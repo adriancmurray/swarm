@@ -1,0 +1,104 @@
+# Example swarm engine configuration.
+#
+# Copy this file to the engine's config path and edit it to taste. Everything
+# here is optional: with no config at all the engine uses built-in defaults and
+# resolves the public `claude` / `codex` CLIs if they are installed.
+#
+# -----------------------------------------------------------------------------
+# Adding your own agents
+# -----------------------------------------------------------------------------
+# Private and local agents are wired HERE, in config — never in engine code. The
+# engine ships only generic backend kinds; any command-line tool, any
+# OpenAI-compatible HTTP endpoint, or the built-in native agent can be registered
+# as a descriptor below. To wrap a private wrapper binary, copy the commented
+# `[backend.my-agent]` block and point `command` at your binary. Do not add agent
+# names to the engine source.
+#
+# The `[backend.*]` blocks below are LIVE config: they are loaded into the
+# `BackendRegistry` at dispatch, and their ids are selectable anywhere a backend
+# name is accepted -- `--agent <id>`, worker specs (`role=<id>[:model]`),
+# `[routes.*].preferred`, and `[reliability].fallback_chain`. A descriptor that
+# reuses a built-in id (e.g. `[backend.codex]`) shadows the built-in, so a name
+# can be re-pointed at your own wrapper. Unknown ids fail at dispatch with an
+# error listing every registered backend. Args support `{prompt}`, `{model}`,
+# and `{cwd}` template tokens.
+
+# =============================================================================
+# Backend descriptors (spec §4.2) — declarative, no code required.
+# =============================================================================
+
+# kind = "cli": wrap any command-line agent. `{model}` and `{prompt}` are
+# templated into `args`; `prompt` chooses whether the prompt is passed on stdin
+# or as an argument; `stream` selects how output is read back.
+#
+# This is also how a PRIVATE or LOCAL agent is added: copy the block, rename it,
+# and point `command` at your own wrapper binary. Use a generic command name —
+# never a vendor-internal binary name baked into engine code.
+#
+# [backend.my-agent]
+# kind        = "cli"
+# command     = "my-agent"                 # your wrapper binary, on PATH
+# args        = ["--print", "{model}"]     # {model}/{prompt} are templated
+# prompt      = "stdin"                     # or "arg"
+# stream      = "stdout-lines"
+# ready_check = { binary = "my-agent" }    # how to detect availability
+
+# Public CLI agents ship as ordinary descriptors too — there is nothing special
+# about the built-ins:
+#
+# [backend.codex]
+# kind        = "cli"
+# command     = "codex"
+# args        = ["exec", "--model", "{model}"]
+# prompt      = "stdin"
+# stream      = "stdout-lines"
+# ready_check = { binary = "codex" }
+#
+# [backend.claude]
+# kind        = "cli"
+# command     = "claude"
+# args        = ["--print", "--model", "{model}"]
+# prompt      = "stdin"
+# stream      = "stdout-lines"
+# ready_check = { binary = "claude" }
+
+# kind = "openai-compatible": any /v1/chat/completions endpoint. Credentials and
+# base URL come from environment variables — never inline secrets in config.
+# Requires the `openai` cargo feature.
+#
+# [backend.api]
+# kind          = "openai-compatible"
+# base_url_env  = "OPENAI_BASE_URL"        # default https://api.openai.com/v1
+# api_key_env   = "OPENAI_API_KEY"
+# default_model = "gpt-4o-mini"
+
+# kind = "native": the built-in agent harness (provider + tool loop), no external
+# process. `provider` names an `openai-compatible` backend declared above.
+# Requires the `native` cargo feature.
+#
+# [backend.local]
+# kind     = "native"
+# provider = "api"
+
+# =============================================================================
+# Engine settings consumed today.
+# =============================================================================
+
+[settings]
+# Default backend when --agent is not passed. Resolves by descriptor / built-in
+# id. Public CLIs `claude` and `codex` are available out of the box.
+default_agent = "claude"
+
+# Per-role routing: when a worker's role matches, `preferred` is its ordered
+# fallback chain (de-duplicated by backend).
+[routes.architecture]
+preferred = ["claude:sonnet", "codex"]
+
+[routes.implementation]
+preferred = ["codex", "claude:sonnet"]
+
+# Global retry + cross-backend fallback policy used when a role has no route.
+[reliability]
+retry_attempts   = 1
+retry_backoff_ms = 1500
+fallback_chain   = ["claude:sonnet", "codex"]

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: No Python files
+        run: test -z "$(find . -name '*.py' -not -path './.git/*' -not -path './target/*')"
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (feature combos)
+        run: |
+          cargo clippy -p swarm-exec --features openai --all-targets -- -D warnings
+          cargo clippy -p swarm-exec --features native --all-targets -- -D warnings
+          cargo clippy -p swarm-manager --features http --all-targets -- -D warnings
+          cargo clippy -p swarm-mcp --features registry --all-targets -- -D warnings
+
+      - name: Test (default features)
+        run: cargo test --workspace
+
+      - name: Test (feature combos)
+        run: |
+          cargo test -p swarm-exec --features openai
+          cargo test -p swarm-exec --features native
+          cargo test -p swarm-manager --features http
+          cargo test -p swarm-registrar
+          cargo test -p swarm-mcp --features registry

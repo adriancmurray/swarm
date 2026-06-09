@@ -1,0 +1,984 @@
+[
+  {
+    "name": "agent_swarm_manifest",
+    "description": "Return Agent Swarm's package manifest and detected backend availability.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_insights",
+    "description": "Return lazy aggregate routing insights derived from append-only agent outcome telemetry.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_profiles",
+    "description": "List dedicated agent profiles with role matches, helper agents, automation hooks, and deterministic checks.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_automation_hooks",
+    "description": "List deterministic host-only automation hooks that profiles can request without baking codegen tools into the substrate.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_presets",
+    "description": "List common swarm presets for architecture councils, audits, UI polish, regression hunts, and API docs follow-up.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_preset",
+    "description": "Execute a named common swarm preset by id.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "helpers": {
+          "default": true,
+          "description": "Enable profile-selected one-layer helper agents.",
+          "type": "boolean"
+        },
+        "preset_id": {
+          "enum": [
+            "architecture-council",
+            "codebase-audit",
+            "ui-polish",
+            "regression-hunt",
+            "api-docs-followup"
+          ],
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "preset_id",
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_recommend",
+    "description": "Recommend manager and participant specs for a task using learned telemetry plus safe defaults.",
+    "inputSchema": {
+      "properties": {
+        "prompt": {
+          "description": "Task or objective to route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_feedback",
+    "description": "Record explicit user feedback for an agent/role so future routing can learn over time.",
+    "inputSchema": {
+      "properties": {
+        "agent": {
+          "description": "Agent spec that received feedback, such as gemini or claude:sonnet",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "win",
+            "loss",
+            "success",
+            "failure",
+            "helpful",
+            "unhelpful"
+          ],
+          "type": "string"
+        },
+        "role": {
+          "description": "Routing role, such as architecture, hardening, api-docs, or manager",
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "agent",
+        "outcome"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_proposals",
+    "description": "List open learning-layer proposals and agent votes.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_proposal_record",
+    "description": "Record a proposal for future swarm behavior, routing, UI, or architecture changes.",
+    "inputSchema": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "proposed_by": {
+          "description": "Agent, user, or system that proposed the change.",
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_proposal_vote",
+    "description": "Append an agent or user vote to a proposal. Votes are advisory and visible in insights.",
+    "inputSchema": {
+      "properties": {
+        "proposal_id": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "vote": {
+          "enum": [
+            "approve",
+            "reject",
+            "defer",
+            "yes",
+            "no",
+            "+1",
+            "-1"
+          ],
+          "type": "string"
+        },
+        "voter": {
+          "description": "Agent spec, role, or user label.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "voter",
+        "vote"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_activity_record",
+    "description": "Append a harness-neutral live activity record so any runtime can appear in the Agent Swarm graph.",
+    "inputSchema": {
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "agent_type": {
+          "description": "codex, claude, gemini, agent, app, etc.",
+          "type": "string"
+        },
+        "cullable_handle": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "depth": {
+          "description": "Graph depth. Defaults to 0 without parent_id, otherwise 1.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "node_id": {
+          "description": "Stable node id. Defaults to session_id for a director/root record.",
+          "type": "string"
+        },
+        "parent_id": {
+          "description": "Parent node id when this is a child worker/sub-agent.",
+          "type": "string"
+        },
+        "policy_state": {
+          "type": "string"
+        },
+        "prompt_preview": {
+          "description": "Bounded preview only; do not send full prompts or secrets.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Stable activity/session id that groups related nodes.",
+          "type": "string"
+        },
+        "slice_id": {
+          "type": "string"
+        },
+        "status": {
+          "description": "running, idle, completed, failed, lost, or another future-safe status.",
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "total_duration_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_run",
+    "description": "Dispatch one prompt to Gemini, Claude, Codex, or auto-selected backend. Defaults to consult/read-only mode.",
+    "inputSchema": {
+      "properties": {
+        "agent": {
+          "description": "Backend agent. Also accepts AGENT:MODEL strings at runtime.",
+          "enum": [
+            "auto",
+            "gemini",
+            "claude",
+            "codex"
+          ],
+          "type": "string"
+        },
+        "allow_bypass_permissions": {
+          "default": false,
+          "description": "Explicitly allow Claude Code permission bypass in non-quiet mode.",
+          "type": "boolean"
+        },
+        "cwd": {
+          "description": "Working directory context",
+          "type": "string"
+        },
+        "model": {
+          "description": "Optional backend model hint; currently used by Claude",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Task or question for the backend agent",
+          "type": "string"
+        },
+        "quiet": {
+          "default": true,
+          "description": "Consult mode when true; agent/autonomous mode when false.",
+          "type": "boolean"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_swarm",
+    "description": "Run a tracked manager/worker fan-out swarm and return the manager synthesis.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Task for the swarm",
+          "type": "string"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "workers": {
+          "description": "Worker specs such as architecture=gemini or implementation=codex",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_fanout",
+    "description": "Alias for agent_swarm_swarm; run parallel workers with session events for live UIs.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Task for the swarm",
+          "type": "string"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "workers": {
+          "description": "Worker specs such as architecture=gemini or implementation=codex",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_discuss",
+    "description": "Run a bounded multi-round discussion between agents, emit JSONL events, and return manager synthesis.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "docs": {
+          "default": false,
+          "description": "Run a trailing API-docs recommendation subagent.",
+          "type": "boolean"
+        },
+        "docs_agent": {
+          "description": "Backend for the docs follow-up, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "helpers": {
+          "default": false,
+          "description": "Enable profile-selected one-layer helper agents.",
+          "type": "boolean"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "participants": {
+          "description": "Participant specs such as architecture=gemini or code-quality=claude:sonnet",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "Task for the discussion",
+          "type": "string"
+        },
+        "rounds": {
+          "default": 2,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_audit",
+    "description": "Run a preset codebase audit discussion with local peer context, manager synthesis, session events, and optional API-docs follow-up.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "docs": {
+          "default": true,
+          "description": "Run a trailing API-docs recommendation subagent.",
+          "type": "boolean"
+        },
+        "docs_agent": {
+          "description": "Backend for the docs follow-up, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "focus": {
+          "default": "all",
+          "description": "Audit emphasis.",
+          "enum": [
+            "all",
+            "simplify",
+            "harden",
+            "architecture",
+            "api-docs",
+            "tests"
+          ],
+          "type": "string"
+        },
+        "helpers": {
+          "default": false,
+          "description": "Enable profile-selected one-layer helper agents.",
+          "type": "boolean"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "no_docs": {
+          "default": false,
+          "description": "Disable the default docs follow-up.",
+          "type": "boolean"
+        },
+        "participants": {
+          "description": "Override participant specs such as architecture=gemini",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "Audit objective",
+          "type": "string"
+        },
+        "rounds": {
+          "default": 2,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_discuss_start",
+    "description": "Start a multi-agent discussion in a local background process and return immediately with a job id for live monitoring.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "docs": {
+          "default": false,
+          "type": "boolean"
+        },
+        "docs_agent": {
+          "type": "string"
+        },
+        "helpers": {
+          "default": false,
+          "type": "boolean"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "participants": {
+          "description": "Participant specs such as architecture=gemini or code-quality=claude:sonnet",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "Task for the discussion",
+          "type": "string"
+        },
+        "rounds": {
+          "default": 2,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_audit_start",
+    "description": "Start a codebase audit council in a local background process and return immediately with a job id for live monitoring.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "docs": {
+          "default": true,
+          "type": "boolean"
+        },
+        "docs_agent": {
+          "type": "string"
+        },
+        "focus": {
+          "default": "all",
+          "enum": [
+            "all",
+            "simplify",
+            "harden",
+            "architecture",
+            "api-docs",
+            "tests"
+          ],
+          "type": "string"
+        },
+        "helpers": {
+          "default": false,
+          "type": "boolean"
+        },
+        "manager": {
+          "type": "string"
+        },
+        "no_docs": {
+          "default": false,
+          "type": "boolean"
+        },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "Audit objective",
+          "type": "string"
+        },
+        "rounds": {
+          "default": 2,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_design",
+    "description": "Run a design-centered review council for product UI, motion, interaction, accessibility, and implementation planning.",
+    "inputSchema": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "docs": {
+          "default": false,
+          "description": "Run a trailing API-docs recommendation subagent.",
+          "type": "boolean"
+        },
+        "docs_agent": {
+          "description": "Backend for the docs follow-up, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "focus": {
+          "default": "all",
+          "description": "Design review emphasis.",
+          "enum": [
+            "all",
+            "visual-system",
+            "motion",
+            "interaction",
+            "accessibility",
+            "implementation"
+          ],
+          "type": "string"
+        },
+        "helpers": {
+          "default": false,
+          "description": "Enable profile-selected one-layer helper agents.",
+          "type": "boolean"
+        },
+        "manager": {
+          "description": "Manager backend, e.g. claude:sonnet",
+          "type": "string"
+        },
+        "participants": {
+          "description": "Override participant specs such as product-design=gemini",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "Design objective",
+          "type": "string"
+        },
+        "rounds": {
+          "default": 2,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_job_start",
+    "description": "Start a lightweight local Agent Swarm background job. Defaults to consult/read-only mode unless quiet=false.",
+    "inputSchema": {
+      "properties": {
+        "agent": {
+          "description": "Backend agent. Also accepts AGENT:MODEL strings at runtime.",
+          "enum": [
+            "auto",
+            "gemini",
+            "claude",
+            "codex"
+          ],
+          "type": "string"
+        },
+        "allow_bypass_permissions": {
+          "default": false,
+          "description": "Explicitly allow Claude Code permission bypass in non-quiet mode.",
+          "type": "boolean"
+        },
+        "cwd": {
+          "description": "Working directory context",
+          "type": "string"
+        },
+        "model": {
+          "description": "Optional backend model hint; currently used by Claude",
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Task or question for the backend agent",
+          "type": "string"
+        },
+        "quiet": {
+          "default": true,
+          "description": "Consult mode when true; agent/autonomous mode when false.",
+          "type": "boolean"
+        },
+        "timeout_secs": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_job_status",
+    "description": "List recent Agent Swarm background jobs or inspect one by id.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "description": "Optional job id",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_job_result",
+    "description": "Return the result for one Agent Swarm background job, or the latest job when omitted.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "description": "Optional job id",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_job_cancel",
+    "description": "Cancel a queued or running Agent Swarm background job.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "description": "Job id to cancel",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_session_list",
+    "description": "List recent multi-agent discussion sessions.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_session_events",
+    "description": "Return the JSONL event stream for a discussion session.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "description": "Discussion session id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_session_transcript",
+    "description": "Return the Markdown transcript for a discussion session.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "description": "Discussion session id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_session_summary",
+    "description": "Return bounded structured status, digest, and artifact pointers for one session.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "description": "Discussion session id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_session_artifacts",
+    "description": "Return filesystem artifact paths for one session without reconstructing paths in the client.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "description": "Discussion session id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_runtime_processes",
+    "description": "List tracked live/lost session and background-job processes for swarm monitoring.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_monitor_status",
+    "description": "Return whether the Agent Swarm resource monitor sidecar is running and where alerts are stored.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_monitor_start",
+    "description": "Start or replace the lightweight Agent Swarm monitor sidecar for RSS spike, stale job, and heartbeat alerts.",
+    "inputSchema": {
+      "properties": {
+        "interval_secs": {
+          "default": 5,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "replace": {
+          "default": false,
+          "description": "Restart the sidecar when it is already running so new thresholds take effect.",
+          "type": "boolean"
+        },
+        "rss_mb": {
+          "default": 4096,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "spike_factor": {
+          "default": 2.5,
+          "minimum": 1.1,
+          "type": "number"
+        },
+        "stale_secs": {
+          "default": 300,
+          "minimum": 30,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_alerts",
+    "description": "Return recent monitor alerts and heartbeat events for agents and dashboards.",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "since_ts_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_context_gather",
+    "description": "Gather bounded read-only local context for a query, preferring ranked paths and excerpts over manifest dumps.",
+    "inputSchema": {
+      "properties": {
+        "budget_tokens": {
+          "default": 1200,
+          "minimum": 128,
+          "type": "integer"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_overview",
+    "description": "Return a single aggregated digest of all current swarm activity: running/recent sessions, running/recent jobs, active monitor alerts, and summary counts. One call instead of polling sessions + jobs + alerts separately.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_settings_get",
+    "description": "Return the current [settings] section of the Agent Swarm config as JSON. Settings are adjustable via agent_swarm_settings_set and take effect on the next invocation.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  {
+    "name": "agent_swarm_settings_set",
+    "description": "Write a new [settings] section to the Agent Swarm config. All other config content is preserved (default_timeout, default_agent, [reliability], [routes], etc.). Changes take effect on the next invocation since config is loaded once per process.",
+    "inputSchema": {
+      "properties": {
+        "docs_default": {
+          "description": "Enable the API-docs follow-up worker by default in discuss/design runs without --docs. Audit's built-in docs-ON is unaffected.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  }
+]

@@ -1,0 +1,23 @@
+[package]
+name = "swarm-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Stateless leaf modules for the swarm runtime — below exec, no agent-swarm dep"
+
+# Gate-2 isolation: depends ONLY on swarm-store, swarm-core, swarm-contracts,
+# plus external crates the leaves need. No external-system deps.
+[dependencies]
+swarm-store = { path = "../swarm-store" }
+swarm-core  = { path = "../swarm-core" }
+swarm-contracts = { path = "../swarm-contracts" }
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+toml             = "0.8"
+sysinfo          = "0.30"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

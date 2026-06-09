@@ -1,0 +1,16 @@
+[package]
+name = "swarm-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Gate-2 isolation: depends ONLY on swarm-core, swarm-contracts, serde, serde_json.
+# No external-system deps.
+[dependencies]
+swarm-core = { path = "../swarm-core" }
+swarm-contracts = { path = "../swarm-contracts" }
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+
+[dev-dependencies]
+tempfile = "3"

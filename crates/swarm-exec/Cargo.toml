@@ -1,0 +1,42 @@
+[package]
+name = "swarm-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Swarm engine — executor, orchestration, synthesis, session, preflight, background/monitor runtimes"
+
+# Gate-2 isolation: depends ONLY on swarm-kernel, swarm-store, swarm-core,
+# swarm-contracts, plus external crates the engine needs.
+# No external-system deps.
+[dependencies]
+swarm-kernel = { path = "../swarm-kernel" }
+swarm-store  = { path = "../swarm-store" }
+swarm-core   = { path = "../swarm-core" }
+swarm-contracts = { path = "../swarm-contracts" }
+serde             = { version = "1", features = ["derive"] }
+serde_json        = "1"
+toml              = "0.8"
+sysinfo           = "0.30"
+notify            = "6"
+# HTTP for the OpenAI-compatible backend — gated behind the `openai` feature so
+# the default build pulls no HTTP/TLS deps. rustls = pure-Rust TLS (no OpenSSL),
+# keeping with "pure Rust, compiled on host".
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+# The single-agent manager core — pulled in only by the `native` backend
+# feature so the default build carries no async-runtime / HTTP dependency.
+swarm-manager = { path = "../swarm-manager", optional = true }
+
+[features]
+# Off by default: enables the OpenAI-compatible HTTP backend and its deps.
+openai = ["dep:ureq"]
+# Off by default: enables the in-process `native` agent backend, backed by the
+# manager core with its HTTP providers (`http` feature) compiled in.
+native = ["dep:swarm-manager", "swarm-manager/http"]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+# Used only by the `native` backend's tests to implement a scripted Provider.
+async-trait = "0.1"

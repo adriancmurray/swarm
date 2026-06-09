@@ -1,0 +1,11 @@
+[package]
+name = "swarm-registrar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optional, generic self-registration into a JSON service registry at a configurable path (off by default; no required dependents)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"

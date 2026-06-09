@@ -1,0 +1,40 @@
+[package]
+name = "swarm-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server layer for the swarm runtime — hand-written stdio loop, dispatch, schema, manifest, overview, and report"
+
+# P5-S6 cleanup: gen_mcp_tools relocated here from tools/agent-swarm/rust. It writes
+# the frozen mcp-tools.json artifact (committed beside this Cargo.toml) from the
+# descriptor table via swarm_mcp::mcp_schema::mcp_tools_pretty_json() — the same
+# single serialization path the idempotency test asserts against.
+[[bin]]
+name = "gen_mcp_tools"
+path = "src/bin/gen_mcp_tools.rs"
+
+# Gate-2 isolation: depends ONLY on swarm-exec, swarm-kernel, swarm-store,
+# swarm-core, swarm-contracts, plus external crates the MCP layer needs.
+# No external-system deps.
+[dependencies]
+swarm-exec   = { path = "../swarm-exec" }
+swarm-kernel = { path = "../swarm-kernel" }
+swarm-store  = { path = "../swarm-store" }
+swarm-core   = { path = "../swarm-core" }
+swarm-contracts = { path = "../swarm-contracts" }
+serde             = { version = "1", features = ["derive"] }
+serde_json        = "1"
+sysinfo           = "0.30"
+rmcp              = { version = "1.7.0", features = ["server", "transport-io"], optional = true }
+# Optional, off by default: a generic JSON service-registry hook. The default
+# floor build pulls nothing new — the dependency only links under `--features
+# registry`, and even then registration is opt-in (a `None` registrar is a
+# no-op). See `src/registry_hook.rs`.
+swarm-registrar = { path = "../swarm-registrar", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+rmcp = ["dep:rmcp"]
+registry = ["dep:swarm-registrar"]

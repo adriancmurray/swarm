@@ -1,0 +1,19 @@
+# Virtual workspace — all crates share one target/ dir.
+[workspace]
+resolver = "2"
+members = [
+    "crates/swarm-contracts",
+    "crates/swarm-core",
+    "crates/swarm-store",
+    "crates/swarm-manager",
+    "crates/swarm-kernel",
+    "crates/swarm-exec",
+    "crates/swarm-mcp",
+    "crates/swarm-cli",
+    "crates/swarm-registrar",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"

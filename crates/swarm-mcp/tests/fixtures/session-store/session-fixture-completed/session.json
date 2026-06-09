@@ -1,0 +1,15 @@
+{
+  "id": "session-fixture-completed",
+  "created_at_ms": 1780000000000,
+  "prompt": "Run a checked-in fixture review for session contracts.",
+  "cwd": "/tmp/swarm-fixture",
+  "rounds": 1,
+  "manager": "claude:sonnet",
+  "participants": [
+    {
+      "role": "qa",
+      "agent": "gemini"
+    }
+  ],
+  "docs": true
+}
