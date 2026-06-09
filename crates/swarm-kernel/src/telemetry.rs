@@ -588,11 +588,7 @@ fn average(values: impl Iterator<Item = u128>) -> u128 {
         count += 1;
         sum += value;
     }
-    if count == 0 {
-        0
-    } else {
-        sum / count
-    }
+    sum.checked_div(count).unwrap_or(0)
 }
 
 fn now_ms() -> u128 {
