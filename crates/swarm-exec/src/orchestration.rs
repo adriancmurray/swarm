@@ -1180,7 +1180,7 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
             ];
             args.extend(passthrough);
             args.push(prompt);
-            run_discussion(parse_discuss_args(args.into_iter())?)
+            run_discussion(parse_discuss_args(args)?)
         }
         "codebase-audit" => {
             let mut args = vec![
@@ -1200,7 +1200,7 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
             ];
             args.extend(passthrough);
             args.push(prompt);
-            run_discussion(parse_audit_args(args.into_iter())?)
+            run_discussion(parse_audit_args(args)?)
         }
         "ui-polish" => {
             let mut args = vec![
@@ -1219,7 +1219,7 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
             ];
             args.extend(passthrough);
             args.push(prompt);
-            run_discussion(parse_design_args(args.into_iter())?)
+            run_discussion(parse_design_args(args)?)
         }
         "regression-hunt" => {
             let mut args = vec![
@@ -1234,7 +1234,7 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
             ];
             args.extend(passthrough);
             args.push(prompt);
-            run_swarm(parse_swarm_args(args.into_iter())?)
+            run_swarm(parse_swarm_args(args)?)
         }
         "api-docs-followup" => {
             let mut args = vec![
@@ -1249,7 +1249,7 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
             ];
             args.extend(passthrough);
             args.push(prompt);
-            run_discussion(parse_discuss_args(args.into_iter())?)
+            run_discussion(parse_discuss_args(args)?)
         }
         other => Err(format!(
             "Error: unknown preset `{other}`. Run `agent-swarm presets` to list available presets."
