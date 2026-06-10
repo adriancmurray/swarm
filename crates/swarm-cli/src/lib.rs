@@ -9,6 +9,7 @@
 mod cli;
 mod cli_commands;
 mod cli_read_commands;
+mod doctor;
 pub mod package_repo;
 mod provider_commands;
 pub mod routing_repo;

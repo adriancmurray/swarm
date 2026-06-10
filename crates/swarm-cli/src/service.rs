@@ -13,6 +13,7 @@ use crate::cli_read_commands::{
     cmd_feedback, cmd_insights, cmd_ledger, cmd_manifest, cmd_overview, cmd_presets, cmd_profiles,
     cmd_proposal_vote, cmd_proposals, cmd_propose, cmd_recommend,
 };
+use crate::doctor::cmd_doctor;
 use crate::provider_commands::cmd_provider;
 use crate::scaffold::cmd_scaffold_backend;
 use swarm_exec::background_runtime::{cmd_command_worker, cmd_job_worker, start_background_job};
@@ -136,6 +137,7 @@ impl SwarmService {
                 }
                 CliCommand::Overview => return cmd_overview(),
                 CliCommand::Provider => return cmd_provider(&raw[1..]),
+                CliCommand::Doctor => return cmd_doctor(&raw[1..]),
                 CliCommand::AntigravityConfig => return cmd_antigravity_config(&raw[1..]),
                 CliCommand::ScaffoldBackend => return cmd_scaffold_backend(&raw[1..]),
             }

@@ -131,6 +131,30 @@ cargo run -p swarm-cli -- discuss \
 With no config, the engine uses built-in defaults and resolves public `claude`
 and `codex` CLIs when they are installed.
 
+On a fresh install, `swarm doctor` checks the whole setup in one pass: config
+parse, every backend's readiness, routing strings that point nowhere, and
+provider credential status. It exits non-zero when something would block a run.
+
+### Providers & credentials
+
+Stored provider configurations (for `native` backends) live in an encrypted
+registry under `~/.swarm/providers`. API keys are encrypted at rest with a
+master key held in the OS keyring; when no keyring is available, keys are
+never written to disk and are read at runtime from the
+`SWARM_PROVIDER_KEY_<ID>` environment variable instead.
+
+```sh
+swarm provider add api --type openai --models gpt-4o-mini
+pbpaste | swarm provider key set api    # key is read from stdin — never argv
+swarm provider list                      # id, type, endpoint, models, key status
+swarm provider key check api
+```
+
+`key set` never accepts the key as a command-line argument (argv leaks into
+process listings and shell history) and never echoes it back — the only
+acknowledgment is a masked length. `--from-env VAR` copies a key from an
+environment variable into the vault.
+
 ## Core Commands
 
 | Command | Use it for |
@@ -142,6 +166,8 @@ and `codex` CLIs when they are installed.
 | `mcp` | Start the MCP server layer. |
 | `sessions`, `events`, `transcript`, `overview` | Inspect prior work and runtime output. |
 | `scaffold-backend` | Generate a descriptor and Rust trait skeleton for a new backend. |
+| `provider` | Manage stored providers and their credentials (vault + env fallback). |
+| `doctor` | Health-check config, backends, routing, and provider credentials. |
 
 ## Feature Flags
 

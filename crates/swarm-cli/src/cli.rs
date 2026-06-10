@@ -42,6 +42,7 @@ pub(crate) enum CliCommand {
     Run,
     Overview,
     Provider,
+    Doctor,
     AntigravityConfig,
     ScaffoldBackend,
 }
@@ -89,6 +90,7 @@ const CLI_COMMANDS: &[(&str, CliCommand)] = &[
     ("run", CliCommand::Run),
     ("overview", CliCommand::Overview),
     ("provider", CliCommand::Provider),
+    ("doctor", CliCommand::Doctor),
     ("antigravity-config", CliCommand::AntigravityConfig),
     ("scaffold-backend", CliCommand::ScaffoldBackend),
 ];
@@ -166,6 +168,7 @@ mod tests {
                 "run",
                 "overview",
                 "provider",
+                "doctor",
                 "antigravity-config",
                 "scaffold-backend",
             ]

@@ -167,6 +167,14 @@ impl BackendRegistry {
         self.backends.insert(id.into(), backend);
     }
 
+    /// All registered backend ids, sorted. Used by health checks (`doctor`)
+    /// that walk every backend.
+    pub fn ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.backends.keys().cloned().collect();
+        ids.sort_unstable();
+        ids
+    }
+
     /// Resolve a backend by id, or a clear error listing the available ids.
     pub fn resolve(&self, id: &str) -> Result<&dyn AgentBackend, String> {
         self.backends.get(id).map(|b| b.as_ref()).ok_or_else(|| {
@@ -202,6 +210,24 @@ mod tests {
         }
         assert!(reg.resolve("anthropic").is_ok());
         assert!(reg.resolve("openai").is_ok());
+    }
+
+    #[test]
+    fn ids_lists_every_registered_backend_sorted() {
+        let mut reg = BackendRegistry::with_builtins();
+        reg.register_descriptor(
+            "aaa-first",
+            BackendDescriptor {
+                kind: BackendKind::Cli,
+                command: Some("printf".to_string()),
+                ..Default::default()
+            },
+        );
+        let ids = reg.ids();
+        assert_eq!(
+            ids,
+            vec!["aaa-first", "anthropic", "claude", "codex", "openai"]
+        );
     }
 
     #[test]
