@@ -444,7 +444,7 @@ mod ledger_cmd_tests {
                     "id": "ui-1",
                     "task": "Fix graph node layout",
                     "expected_classification": "ui-design",
-                    "must_touch": ["packages/panels/kard_dech_agent"],
+                    "must_touch": ["packages/panels/graph_panel"],
                     "must_not_touch": ["mesh/crates/secret-vault"],
                     "quality_checks": ["Graph layout is stable."],
                     "escalation_expected": false
@@ -2340,7 +2340,7 @@ mod tests {
             id: "fixture-1".to_string(),
             task: "Fix graph wires and node expansion".to_string(),
             expected_classification: "ui-design".to_string(),
-            must_touch: vec!["packages/panels/kard_dech_agent".to_string()],
+            must_touch: vec!["packages/panels/graph_panel".to_string()],
             must_not_touch: vec!["mesh/crates/secret-vault".to_string()],
             quality_checks: vec![
                 "Wire endpoints stay attached.".to_string(),
@@ -2421,7 +2421,7 @@ mod tests {
                     "id": "ui-1",
                     "task": "Fix graph node layout",
                     "expected_classification": "ui-design",
-                    "must_touch": ["packages/panels/kard_dech_agent"],
+                    "must_touch": ["packages/panels/graph_panel"],
                     "must_not_touch": ["mesh/crates/secret-vault"],
                     "quality_checks": ["Graph layout is stable."],
                     "escalation_expected": false

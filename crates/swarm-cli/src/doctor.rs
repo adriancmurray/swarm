@@ -14,7 +14,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use swarm_exec::backend_registry::BackendRegistry;
-use swarm_kernel::args::{config_path, parse_agent_choice};
+use swarm_exec::executor::execute_partner;
+use swarm_exec::preflight::{classify_error, suggested_action_for_error};
+use swarm_kernel::agent::AgentChoice;
+use swarm_kernel::args::{config_path, parse_agent_choice, Args};
 use swarm_kernel::backend_descriptor::BackendKind;
 use swarm_kernel::config::SwarmConfig;
 use swarm_manager::{ProviderConfig, ProviderRegistry};
@@ -51,21 +54,9 @@ fn load_config_with_status() -> (SwarmConfig, ConfigStatus) {
     }
 }
 
-/// Entry point for `swarm doctor [--data-dir PATH]`.
+/// Entry point for `swarm doctor [--probe] [--data-dir PATH]`.
 pub(crate) fn cmd_doctor(raw: &[String]) -> Result<i32, String> {
-    let mut data_dir: Option<PathBuf> = None;
-    let mut iter = raw.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--data-dir" => {
-                data_dir =
-                    Some(PathBuf::from(iter.next().ok_or_else(|| {
-                        "Error: --data-dir requires a path.".to_string()
-                    })?));
-            }
-            other => return Err(format!("Error: unknown `doctor` argument `{other}`.")),
-        }
-    }
+    let (data_dir, probe) = parse_doctor_flags(raw)?;
 
     let (config, status) = load_config_with_status();
     let registry = BackendRegistry::from_config(&config);
@@ -78,7 +69,27 @@ pub(crate) fn cmd_doctor(raw: &[String]) -> Result<i32, String> {
     };
 
     let mut out = io::stdout();
-    run_doctor(&config, &status, &registry, &providers, &mut out)
+    run_doctor(&config, &status, &registry, &providers, probe, &mut out)
+}
+
+/// Parse `doctor` flags: `--data-dir PATH` and the opt-in `--probe`.
+fn parse_doctor_flags(raw: &[String]) -> Result<(Option<PathBuf>, bool), String> {
+    let mut data_dir: Option<PathBuf> = None;
+    let mut probe = false;
+    let mut iter = raw.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--data-dir" => {
+                data_dir =
+                    Some(PathBuf::from(iter.next().ok_or_else(|| {
+                        "Error: --data-dir requires a path.".to_string()
+                    })?));
+            }
+            "--probe" => probe = true,
+            other => return Err(format!("Error: unknown `doctor` argument `{other}`.")),
+        }
+    }
+    Ok((data_dir, probe))
 }
 
 /// The testable core: pure function of an already-loaded config, registry,
@@ -88,6 +99,7 @@ pub(crate) fn run_doctor(
     config_status: &ConfigStatus,
     registry: &BackendRegistry,
     providers: &[ProviderConfig],
+    probe: bool,
     out: &mut dyn Write,
 ) -> Result<i32, String> {
     let mut w =
@@ -125,6 +137,12 @@ pub(crate) fn run_doctor(
                 w(format!("✗ {id}: {err}"))?;
             }
         }
+    }
+    if !subprocess_backend_ids(config, registry).is_empty() {
+        w(
+            "note: for CLI agents, ready means the binary/command was located — authentication is NOT verified. Use `swarm doctor --probe`."
+                .to_string(),
+        )?;
     }
 
     // ── Descriptors: shape checks ────────────────────────────────────────
@@ -218,11 +236,102 @@ pub(crate) fn run_doctor(
         }
     }
 
+    // ── Probe (opt-in): one tiny live request per subprocess backend ─────
+    if probe {
+        w("\n== probe ==".to_string())?;
+        w("--probe sends one real (tiny) request to each CLI agent through the normal dispatch path.".to_string())?;
+        let candidates = subprocess_backend_ids(config, registry);
+        if candidates.is_empty() {
+            w("(no subprocess-backed backends to probe)".to_string())?;
+        }
+        for id in candidates {
+            let ready = registry
+                .resolve(&id)
+                .ok()
+                .map(|backend| backend.ready().is_ok())
+                .unwrap_or(false);
+            if !ready {
+                w(format!("- {id}: skipped (static check already failed)"))?;
+                continue;
+            }
+            match probe_backend(registry, &id) {
+                Ok(()) => w(format!("✓ {id}: responded"))?,
+                Err(err) => {
+                    // Probe failures warn loudly but never block: the static
+                    // gate stays authoritative for the exit code.
+                    warnings += 1;
+                    let category = classify_error(&err);
+                    w(format!("! {id}: probe failed ({category}): {err}"))?;
+                    w(format!("  → {}", suggested_action_for_error(&err)))?;
+                }
+            }
+        }
+    }
+
     // ── Summary ──────────────────────────────────────────────────────────
     w(format!(
         "\nsummary: {blocking} blocking issue(s), {warnings} warning(s)"
     ))?;
     Ok(if blocking == 0 { 0 } else { 1 })
+}
+
+/// Backends that dispatch by spawning a subprocess, in stable order: built-in
+/// CLI agents (when registered and not shadowed by a descriptor) plus every
+/// `kind = "cli"` descriptor. `openai-compatible` / `native` kinds are skipped
+/// — their credential status is already covered by the provider section.
+fn subprocess_backend_ids(config: &SwarmConfig, registry: &BackendRegistry) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for id in ["claude", "codex"] {
+        if !config.backend.contains_key(id) && registry.resolve(id).is_ok() {
+            ids.push(id.to_string());
+        }
+    }
+    let mut descriptor_ids: Vec<&String> = config
+        .backend
+        .iter()
+        .filter(|(_, d)| d.kind == BackendKind::Cli)
+        .map(|(id, _)| id)
+        .collect();
+    descriptor_ids.sort_unstable();
+    ids.extend(descriptor_ids.into_iter().cloned());
+    ids
+}
+
+/// Fixed prompt + timeout for `--probe`: small enough to be cheap, distinctive
+/// enough that any response counts as proof the agent is authenticated.
+const PROBE_PROMPT: &str = "Reply with the single word: pong";
+const PROBE_TIMEOUT_SECS: u64 = 60;
+
+/// Send the tiny probe prompt through the REAL dispatch path
+/// (`execute_partner` with `agent_custom` pinned to the backend id). Success
+/// is a clean exit; anything else comes back as a classifiable error string.
+fn probe_backend(registry: &BackendRegistry, id: &str) -> Result<(), String> {
+    let args = Args {
+        prompt: PROBE_PROMPT.to_string(),
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        timeout_secs: PROBE_TIMEOUT_SECS,
+        quiet: true,
+        agent: AgentChoice::Claude, // placeholder; agent_custom wins at dispatch
+        agent_custom: Some(id.to_string()),
+        model: None,
+        persona: None,
+        background: false,
+        allow_bypass_permissions: false,
+    };
+    let outcome = execute_partner(registry, args.agent, &args, PROBE_PROMPT)?;
+    if outcome.timed_out {
+        return Err(format!(
+            "timed out after {PROBE_TIMEOUT_SECS}s waiting for a response"
+        ));
+    }
+    match outcome.exit_status {
+        Some(0) | None => Ok(()),
+        Some(code) => {
+            let stderr = outcome.stderr.trim();
+            let detail: String = stderr.chars().take(300).collect();
+            Err(format!("exit code {code}: {detail}"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +366,21 @@ mod tests {
             &ConfigStatus::Missing,
             registry,
             providers,
+            false,
+            &mut out,
+        )
+        .unwrap();
+        (code, String::from_utf8(out).unwrap())
+    }
+
+    fn doctor_probe(config: &SwarmConfig, registry: &BackendRegistry) -> (i32, String) {
+        let mut out = Vec::new();
+        let code = run_doctor(
+            config,
+            &ConfigStatus::Missing,
+            registry,
+            &[],
+            true,
             &mut out,
         )
         .unwrap();
@@ -358,6 +482,7 @@ mod tests {
             &ConfigStatus::ParseError(PathBuf::from("/tmp/config.toml"), "boom".to_string()),
             &registry,
             &[],
+            false,
             &mut out,
         )
         .unwrap();
@@ -366,6 +491,103 @@ mod tests {
         assert!(report.contains("failed to parse"), "{report}");
         assert!(report.contains("boom"), "{report}");
         assert!(report.contains("1 warning(s)"), "{report}");
+    }
+
+    #[test]
+    fn doctor_flags_parse_probe_and_data_dir() {
+        let raw: Vec<String> = ["--probe", "--data-dir", "/tmp/x"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let (dir, probe) = parse_doctor_flags(&raw).unwrap();
+        assert!(probe);
+        assert_eq!(dir, Some(PathBuf::from("/tmp/x")));
+        let (dir, probe) = parse_doctor_flags(&[]).unwrap();
+        assert!(!probe);
+        assert_eq!(dir, None);
+        assert!(parse_doctor_flags(&["--frob".to_string()]).is_err());
+    }
+
+    #[test]
+    fn backends_section_footnotes_that_ready_does_not_verify_auth() {
+        let config = config_from(
+            r#"
+            [backend.echo]
+            kind = "cli"
+            command = "printf"
+            "#,
+        );
+        let registry = registry_from(&config);
+        let (_, report) = doctor(&config, &registry, &[]);
+        assert!(
+            report.contains("authentication is NOT verified"),
+            "{report}"
+        );
+        assert!(report.contains("swarm doctor --probe"), "{report}");
+        // One footnote, not per-row spam.
+        assert_eq!(report.matches("authentication is NOT verified").count(), 1);
+    }
+
+    #[test]
+    fn probe_reports_responding_cli_backend_as_success() {
+        let config = config_from(
+            r#"
+            [backend.echo]
+            kind = "cli"
+            command = "printf"
+            args = ["pong"]
+            prompt = "stdin"
+            "#,
+        );
+        let registry = registry_from(&config);
+        let (code, report) = doctor_probe(&config, &registry);
+        assert_eq!(code, 0, "{report}");
+        assert!(report.contains("== probe =="), "{report}");
+        assert!(report.contains("real (tiny) request"), "{report}");
+        assert!(report.contains("✓ echo: responded"), "{report}");
+        assert!(
+            report.contains("0 blocking issue(s), 0 warning(s)"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn probe_classifies_auth_sounding_failure_as_warning_not_blocking() {
+        let config = config_from(
+            r#"
+            [backend.locked]
+            kind = "cli"
+            command = "sh"
+            args = ["-c", "echo 'error: not logged in (credentials live in the macOS login keychain)' >&2; exit 1"]
+            prompt = "stdin"
+            "#,
+        );
+        let registry = registry_from(&config);
+        let (code, report) = doctor_probe(&config, &registry);
+        assert_eq!(code, 0, "probe failures never block: {report}");
+        assert!(
+            report.contains("! locked: probe failed (auth-or-permission)"),
+            "{report}"
+        );
+        assert!(report.contains("not logged in"), "{report}");
+        assert!(report.contains("run it interactively once"), "{report}");
+        assert!(report.contains("1 warning(s)"), "{report}");
+    }
+
+    #[test]
+    fn probe_skips_kinds_whose_keys_the_provider_section_covers() {
+        let config = config_from(
+            r#"
+            [backend.api]
+            kind = "openai-compatible"
+            "#,
+        );
+        let registry = registry_from(&config);
+        let (_, report) = doctor_probe(&config, &registry);
+        assert!(
+            report.contains("(no subprocess-backed backends to probe)"),
+            "{report}"
+        );
     }
 
     #[test]

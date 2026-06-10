@@ -134,6 +134,9 @@ and `codex` CLIs when they are installed.
 On a fresh install, `swarm doctor` checks the whole setup in one pass: config
 parse, every backend's readiness, routing strings that point nowhere, and
 provider credential status. It exits non-zero when something would block a run.
+For CLI agents, "ready" only means the binary was found — `swarm doctor --probe`
+additionally sends one tiny real request to each CLI agent to verify it is
+authenticated on this machine.
 
 ### Providers & credentials
 

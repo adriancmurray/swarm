@@ -115,23 +115,33 @@ pub fn classified_error_payload(label: &str, error: &str) -> serde_json::Value {
 
 pub fn classify_error(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("could not locate") || lower.contains("not found") {
+    // Auth is checked first: real-world auth errors often also contain
+    // "not found" ("item not found in the keychain") or "timed out", and the
+    // auth diagnosis is the actionable one.
+    if lower.contains("auth")
+        || lower.contains("permission")
+        || lower.contains("credential")
+        || lower.contains("keychain")
+        || lower.contains("login")
+        || lower.contains("logged in")
+        || lower.contains("unauthorized")
+        || lower.contains("api key")
+    {
+        "auth-or-permission"
+    } else if lower.contains("could not locate") || lower.contains("not found") {
         "missing-backend"
     } else if lower.contains("timed out") || lower.contains("timeout") {
         "timeout"
-    } else if lower.contains("auth") || lower.contains("permission") || lower.contains("credential")
-    {
-        "auth-or-permission"
     } else {
         "runtime"
     }
 }
 
-fn suggested_action_for_error(error: &str) -> &'static str {
+pub fn suggested_action_for_error(error: &str) -> &'static str {
     match classify_error(error) {
         "missing-backend" => "Install or expose the selected agent CLI on PATH, then rerun preflight.",
         "timeout" => "Inspect the transcript, increase --timeout, or split the task into smaller parallel workers.",
-        "auth-or-permission" => "Authenticate the selected agent CLI and rerun the swarm.",
+        "auth-or-permission" => "Authenticate the agent CLI on this machine (run it interactively once; on macOS, credentials are stored in the login keychain), then rerun.",
         _ => "Inspect stderr/transcript, then rerun the failed participant with a narrower prompt.",
     }
 }
@@ -158,6 +168,26 @@ mod tests {
         assert_eq!(classify_error("timed out waiting"), "timeout");
         assert_eq!(classify_error("permission denied"), "auth-or-permission");
         assert_eq!(classify_error("unexpected stderr"), "runtime");
+    }
+
+    #[test]
+    fn classify_error_treats_keychain_and_login_phrases_as_auth() {
+        for message in [
+            "Keychain item not found",
+            "please run /login first",
+            "you are not logged in",
+            "401 Unauthorized",
+            "missing API key",
+        ] {
+            assert_eq!(classify_error(message), "auth-or-permission", "{message}");
+        }
+    }
+
+    #[test]
+    fn auth_suggested_action_mentions_interactive_login_and_keychain() {
+        let action = suggested_action_for_error("not logged in");
+        assert!(action.contains("run it interactively once"), "{action}");
+        assert!(action.contains("login keychain"), "{action}");
     }
 
     #[test]
