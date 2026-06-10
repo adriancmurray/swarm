@@ -102,13 +102,13 @@ mod tests {
             "kind": "openai-compatible",
             "base_url_env": "OPENAI_BASE_URL",
             "api_key_env": "OPENAI_API_KEY",
-            "default_model": "gpt-4o-mini"
+            "default_model": "gpt-5.4-mini"
         }"#;
         let d: BackendDescriptor = serde_json::from_str(json).unwrap();
         assert!(matches!(d.kind, BackendKind::OpenAiCompatible));
         assert_eq!(d.base_url_env.as_deref(), Some("OPENAI_BASE_URL"));
         assert_eq!(d.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-        assert_eq!(d.default_model.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(d.default_model.as_deref(), Some("gpt-5.4-mini"));
         // A cli-only field stays absent without erroring.
         assert!(d.command.is_none());
     }

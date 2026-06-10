@@ -209,10 +209,10 @@ mod tests {
         let out = backend.render(
             "p={prompt} m={model}",
             "explain {model} scaling",
-            "gpt-5",
+            "gpt-5.5",
             "/work",
         );
-        assert_eq!(out, "p=explain {model} scaling m=gpt-5");
+        assert_eq!(out, "p=explain {model} scaling m=gpt-5.5");
     }
 
     #[test]

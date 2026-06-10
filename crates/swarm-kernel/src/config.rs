@@ -336,7 +336,7 @@ mod tests {
             [backend.api]
             kind = "openai-compatible"
             api_key_env = "MY_API_KEY"
-            default_model = "gpt-4o-mini"
+            default_model = "gpt-5.4-mini"
             "#,
         )
         .unwrap();
@@ -349,7 +349,7 @@ mod tests {
         let api = cfg.backend.get("api").expect("api present");
         assert!(matches!(api.kind, BackendKind::OpenAiCompatible));
         assert_eq!(api.api_key_env.as_deref(), Some("MY_API_KEY"));
-        assert_eq!(api.default_model.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(api.default_model.as_deref(), Some("gpt-5.4-mini"));
     }
 
     #[test]

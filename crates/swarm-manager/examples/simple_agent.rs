@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         None, // use the provider's default endpoint
         Some(api_key),
     );
-    config.models = vec!["gpt-4o-mini".to_string()];
+    config.models = vec!["gpt-5.5".to_string()];
     let provider = create_provider(&config)?;
 
     // 3. Register the built-in tools. They all run unwrapped in v1 (no

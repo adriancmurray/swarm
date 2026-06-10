@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         None, // default endpoint
         Some(api_key),
     );
-    config.models = vec!["gpt-4o-mini".to_string()];
+    config.models = vec!["gpt-5.5".to_string()];
     let provider = create_provider(&config)?;
 
     let mut tools = ToolRegistry::new();

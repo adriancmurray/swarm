@@ -127,7 +127,7 @@ impl ProviderType {
 
     pub fn suggested_models(&self) -> &'static [&'static str] {
         match self {
-            ProviderType::OpenAI => &["gpt-4o", "gpt-4o-mini"],
+            ProviderType::OpenAI => &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
             ProviderType::DeepSeek => &["deepseek-v4-flash", "deepseek-v4-pro"],
             ProviderType::Gemini => &[
                 "gemini-3.5-flash",
@@ -138,9 +138,12 @@ impl ProviderType {
                 "gemini-2.5-flash",
                 "gemini-2.5-flash-lite",
             ],
-            ProviderType::Anthropic => {
-                &["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"]
-            }
+            ProviderType::Anthropic => &[
+                "claude-fable-5",
+                "claude-opus-4-8",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+            ],
             ProviderType::MLX => &["mlx-community/gemma-4-e2b-it-OptiQ-4bit"],
             ProviderType::OpenRouter
             | ProviderType::Ollama
@@ -154,6 +157,8 @@ impl ProviderType {
     pub fn legacy_model_aliases(&self) -> &'static [&'static str] {
         match self {
             ProviderType::DeepSeek => &["deepseek-chat", "deepseek-reasoner"],
+            ProviderType::OpenAI => &["gpt-4o", "gpt-4o-mini"],
+            ProviderType::Anthropic => &["claude-opus-4-7"],
             _ => &[],
         }
     }

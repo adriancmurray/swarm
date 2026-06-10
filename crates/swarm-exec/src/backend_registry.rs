@@ -316,7 +316,7 @@ mod tests {
             BackendDescriptor {
                 kind: BackendKind::OpenAiCompatible,
                 api_key_env: Some("SOME_KEY_VAR".into()),
-                default_model: Some("gpt-4o-mini".into()),
+                default_model: Some("gpt-5.4-mini".into()),
                 ..Default::default()
             },
         );

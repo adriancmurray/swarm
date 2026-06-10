@@ -62,7 +62,7 @@ fn default_system_prompt() -> String {
 pub struct AgentConfig {
     /// Provider type to drive.
     pub provider: ProviderType,
-    /// Model identifier (e.g. `"llama3.2"`, `"gpt-4o"`).
+    /// Model identifier (e.g. `"llama3.2"`, `"gpt-5.5"`).
     pub model: String,
     /// Custom endpoint override.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -714,7 +714,7 @@ mod tests {
         let mut preset = Preset::new(
             "Cfg".into(),
             ProviderType::OpenAI,
-            "gpt-4o".into(),
+            "gpt-5.5".into(),
             Some("https://api.example.test/v1".into()),
             "You are helpful.".into(),
             None,
@@ -726,7 +726,7 @@ mod tests {
 
         let config = preset.to_config();
         assert_eq!(config.provider, ProviderType::OpenAI);
-        assert_eq!(config.model, "gpt-4o");
+        assert_eq!(config.model, "gpt-5.5");
         assert_eq!(
             config.endpoint.as_deref(),
             Some("https://api.example.test/v1")

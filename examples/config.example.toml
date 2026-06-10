@@ -70,7 +70,7 @@
 # kind          = "openai-compatible"
 # base_url_env  = "OPENAI_BASE_URL"        # default https://api.openai.com/v1
 # api_key_env   = "OPENAI_API_KEY"
-# default_model = "gpt-4o-mini"
+# default_model = "gpt-5.5"
 
 # kind = "native": the built-in agent harness (provider + tool loop), no external
 # process. `provider` names an `openai-compatible` backend declared above.

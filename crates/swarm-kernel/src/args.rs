@@ -1284,10 +1284,10 @@ mod tests {
         assert_eq!(spec.model, None);
         assert_eq!(spec.backend_id(), "my-backend");
 
-        let spec = parse_agent_spec_struct("api:gpt-4o-mini").unwrap();
+        let spec = parse_agent_spec_struct("api:gpt-5.4-mini").unwrap();
         assert_eq!(spec.custom.as_deref(), Some("api"));
-        assert_eq!(spec.model.as_deref(), Some("gpt-4o-mini"));
-        assert_eq!(describe_spec(&spec), "api:gpt-4o-mini");
+        assert_eq!(spec.model.as_deref(), Some("gpt-5.4-mini"));
+        assert_eq!(describe_spec(&spec), "api:gpt-5.4-mini");
 
         // Built-ins still parse as built-ins, never as custom.
         let spec = parse_agent_spec_struct("claude:sonnet").unwrap();

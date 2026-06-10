@@ -144,7 +144,7 @@ never written to disk and are read at runtime from the
 `SWARM_PROVIDER_KEY_<ID>` environment variable instead.
 
 ```sh
-swarm provider add api --type openai --models gpt-4o-mini
+swarm provider add api --type openai --models gpt-5.5
 pbpaste | swarm provider key set api    # key is read from stdin — never argv
 swarm provider list                      # id, type, endpoint, models, key status
 swarm provider key check api
