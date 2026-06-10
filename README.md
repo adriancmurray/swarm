@@ -70,6 +70,36 @@ Most integrations should be descriptors only. Drop into Rust only when you need
 a custom handshake, bespoke streaming protocol, non-standard auth, or
 multi-step orchestration that a descriptor cannot express.
 
+## Two layers of skills
+
+The word "skill" shows up in two places here. They are **separate layers that
+never touch** — one shapes a worker, the other drives the engine.
+
+**1. Skills the agent uses.** `SKILL.md` files placed in `~/.swarm/skills/<name>/`
+(or, per-project, `<project>/.swarm/skills/<name>/`, which overrides home by
+name) inject prompt guidance into a *native* worker and gate its tool set to the
+union of each skill's `allowed-tools`. A native backend selects them in config:
+
+```toml
+[backend.local]
+kind     = "native"
+provider = "api"
+skills   = ["reviewer", "doc"]
+```
+
+Inspect what is loadable with `swarm skills list` (prints each skill's name,
+description, source path, and allowed tools).
+
+**2. A skill for driving swarm.** [`skills/using-swarm/SKILL.md`](skills/using-swarm/SKILL.md)
+is the opposite direction: a playbook that teaches a *host* agent (Claude Code,
+Codex, Gemini CLI, etc.) how to orchestrate the `swarm` CLI — which verb to
+pick, the real flags, and how to read results. Copy it into your host agent's
+skills directory. It is never injected into a worker; it only governs how the
+orchestrator is launched.
+
+The two layers do not interact: layer 1 lives inside a worker's system prompt,
+layer 2 lives in the host agent that calls the binary.
+
 ## Modular Crate Architecture
 
 ```text
@@ -170,6 +200,7 @@ environment variable into the vault.
 | `mcp` | Start the MCP server layer. |
 | `sessions`, `events`, `transcript`, `overview` | Inspect prior work and runtime output. |
 | `scaffold-backend` | Generate a descriptor and Rust trait skeleton for a new backend. |
+| `skills` | List the `SKILL.md` skills a native backend can load (`swarm skills list`). |
 | `provider` | Manage stored providers and their credentials (vault + env fallback). |
 | `doctor` | Health-check config, backends, routing, and provider credentials. |
 
