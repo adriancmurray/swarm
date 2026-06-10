@@ -33,9 +33,7 @@ const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant.";
 /// when no explicit data dir is injected. Aligns with the swarm's single
 /// `swarm_home()` data-root convention used elsewhere in the engine.
 fn default_data_dir() -> PathBuf {
-    swarm_store::store::swarm_home()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("providers")
+    swarm_store::store::providers_dir().unwrap_or_else(|| PathBuf::from(".").join("providers"))
 }
 
 /// How a [`NativeBackend`] obtains its provider.

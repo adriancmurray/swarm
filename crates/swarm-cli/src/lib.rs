@@ -10,6 +10,7 @@ mod cli;
 mod cli_commands;
 mod cli_read_commands;
 pub mod package_repo;
+mod provider_commands;
 pub mod routing_repo;
 pub mod scaffold;
 pub mod service;

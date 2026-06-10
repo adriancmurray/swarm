@@ -890,6 +890,8 @@ pub fn print_help(default_timeout_secs: u64) {
          usage: agent-swarm proposal-vote PROPOSAL_ID approve|reject|defer [VOTER] [RATIONALE]\n\
          usage: agent-swarm manifest\n\
          usage: agent-swarm mcp\n\
+         usage: agent-swarm provider add ID --type TYPE [--name NAME] [--endpoint URL] [--models A,B] [--data-dir PATH]\n\
+         usage: agent-swarm provider list|remove ID|key set ID [--from-env VAR]|key check ID [--data-dir PATH]\n\
          usage: agent-swarm antigravity-config ensure [--config PATH] [--mcp PATH]\n\n\
          Dispatch a prompt to a detected frontier partner agent.\n\n\
          positional arguments:\n\

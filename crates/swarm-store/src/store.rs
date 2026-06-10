@@ -77,6 +77,14 @@ pub fn swarm_home() -> Option<PathBuf> {
     home_dir().map(|home| home.join(".swarm"))
 }
 
+/// Resolve the provider-registry data directory: `<swarm home>/providers`.
+///
+/// Single source of truth shared by the native backend and the `provider`
+/// CLI so both always operate on the same registry.
+pub fn providers_dir() -> Option<PathBuf> {
+    swarm_home().map(|home| home.join("providers"))
+}
+
 /// Shared "cannot resolve the data root" error for `swarm_home()` callers.
 pub fn swarm_home_err() -> String {
     "Error: cannot resolve the swarm home (set SWARM_HOME or HOME)".to_string()
@@ -211,6 +219,7 @@ mod tests {
         assert_eq!(swarm_home(), Some(override_dir.clone()));
         assert_eq!(job_store_dir().unwrap(), override_dir.join("jobs"));
         assert_eq!(session_store_dir().unwrap(), override_dir.join("sessions"));
+        assert_eq!(providers_dir(), Some(override_dir.join("providers")));
 
         // SWARM_HOME unset → $HOME/.swarm.
         std::env::remove_var("SWARM_HOME");

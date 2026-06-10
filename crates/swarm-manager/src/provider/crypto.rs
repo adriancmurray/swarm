@@ -93,8 +93,10 @@ impl KeychainVault {
         Self { master_key: None }
     }
 
-    /// Create a vault with a specific master key (for testing).
-    #[cfg(test)]
+    /// Create a vault with a specific master key.
+    ///
+    /// The injection seam for tests and library embedders that manage their
+    /// own master key — no OS keychain is touched.
     pub fn with_key(key: [u8; 32]) -> Self {
         Self {
             master_key: Some(key),

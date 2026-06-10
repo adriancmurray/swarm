@@ -12,6 +12,9 @@ swarm-store  = { path = "../swarm-store" }
 swarm-kernel = { path = "../swarm-kernel" }
 swarm-exec   = { path = "../swarm-exec" }
 swarm-mcp    = { path = "../swarm-mcp" }
+# Default features only: the provider registry + vault, with no async
+# runtime or HTTP client (those live behind swarm-manager's opt-in features).
+swarm-manager = { path = "../swarm-manager" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

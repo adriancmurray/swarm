@@ -1801,6 +1801,7 @@ dependencies = [
  "swarm-core",
  "swarm-exec",
  "swarm-kernel",
+ "swarm-manager",
  "swarm-mcp",
  "swarm-store",
  "tempfile",
