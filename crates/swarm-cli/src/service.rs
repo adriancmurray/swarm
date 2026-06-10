@@ -16,6 +16,7 @@ use crate::cli_read_commands::{
 use crate::doctor::cmd_doctor;
 use crate::provider_commands::cmd_provider;
 use crate::scaffold::cmd_scaffold_backend;
+use crate::skills_commands::cmd_skills;
 use swarm_exec::background_runtime::{cmd_command_worker, cmd_job_worker, start_background_job};
 use swarm_exec::executor::current_swarm_depth;
 use swarm_exec::monitor_runtime::{
@@ -137,6 +138,7 @@ impl SwarmService {
                 }
                 CliCommand::Overview => return cmd_overview(),
                 CliCommand::Provider => return cmd_provider(&raw[1..]),
+                CliCommand::Skills => return cmd_skills(&raw[1..]),
                 CliCommand::Doctor => return cmd_doctor(&raw[1..]),
                 CliCommand::AntigravityConfig => return cmd_antigravity_config(&raw[1..]),
                 CliCommand::ScaffoldBackend => return cmd_scaffold_backend(&raw[1..]),

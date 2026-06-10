@@ -15,6 +15,7 @@ mod provider_commands;
 pub mod routing_repo;
 pub mod scaffold;
 pub mod service;
+mod skills_commands;
 
 pub use service::SwarmService;
 

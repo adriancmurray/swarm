@@ -20,8 +20,8 @@ use swarm_kernel::agent::AgentChoice;
 use swarm_kernel::args::{config_path, parse_agent_choice, Args};
 use swarm_kernel::backend_descriptor::BackendKind;
 use swarm_kernel::config::SwarmConfig;
-use swarm_manager::{ProviderConfig, ProviderRegistry};
-use swarm_store::store::providers_dir;
+use swarm_manager::{load_skills, ProviderConfig, ProviderRegistry};
+use swarm_store::store::{providers_dir, skills_dir};
 
 use crate::provider_commands::key_status_label;
 
@@ -162,6 +162,19 @@ pub(crate) fn run_doctor(
             } else {
                 w(format!("✓ [backend.{id}] kind={kind}"))?;
             }
+            // Native descriptors may request skills by name; warn (non-blocking)
+            // on any requested skill that resolves nowhere in the skill dirs.
+            if descriptor.kind == BackendKind::Native && !descriptor.skills.is_empty() {
+                let (loaded, _issues) = load_skills(&doctor_skill_dirs());
+                for requested in &descriptor.skills {
+                    if !loaded.iter().any(|s| &s.name == requested) {
+                        warnings += 1;
+                        w(format!(
+                            "! [backend.{id}] requests skill `{requested}`, which was not found — see `swarm skills list`"
+                        ))?;
+                    }
+                }
+            }
         }
     }
 
@@ -273,6 +286,20 @@ pub(crate) fn run_doctor(
         "\nsummary: {blocking} blocking issue(s), {warnings} warning(s)"
     ))?;
     Ok(if blocking == 0 { 0 } else { 1 })
+}
+
+/// Skill directories the doctor consults to validate native descriptors'
+/// requested skill names: the home skills dir layered under the project-local
+/// `<cwd>/.swarm/skills`, matching the native backend's resolution order.
+fn doctor_skill_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = skills_dir() {
+        dirs.push(home);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join(".swarm").join("skills"));
+    }
+    dirs
 }
 
 /// Backends that dispatch by spawning a subprocess, in stable order: built-in
@@ -435,6 +462,34 @@ mod tests {
         assert!(report.contains("✗ broken:"), "{report}");
         assert!(report.contains("no `command`"), "{report}");
         assert!(report.contains("1 blocking issue(s)"), "{report}");
+    }
+
+    #[test]
+    fn native_descriptor_unknown_skill_warns_non_blocking() {
+        // A native backend requesting a skill name that cannot exist in any
+        // skill dir → a non-blocking warning that points at `swarm skills list`.
+        // The provider id is also unresolved, but the descriptor SHAPE check
+        // (which carries the skill warning) does not block.
+        let config = config_from(
+            r#"
+            [backend.local]
+            kind = "native"
+            provider = "api"
+            skills = ["zzz-nonexistent-skill-xyz"]
+            "#,
+        );
+        let registry = registry_from(&config);
+        let (_code, report) = doctor(&config, &registry, &[]);
+        // The skill warning is non-blocking: it appears in the descriptor
+        // section and counts toward warnings, regardless of whether the
+        // provider/native readiness check blocks for other (environmental)
+        // reasons.
+        assert!(
+            report.contains("requests skill `zzz-nonexistent-skill-xyz`"),
+            "{report}"
+        );
+        assert!(report.contains("swarm skills list"), "{report}");
+        assert!(report.contains("warning(s)"), "{report}");
     }
 
     #[test]
