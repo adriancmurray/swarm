@@ -202,6 +202,20 @@ pub(crate) fn run_doctor(
             provider.id,
             provider.provider_type.as_str()
         ))?;
+        // Stored model ids that are now legacy aliases still load, but new
+        // work should move off them — warn (non-blocking) and point at the
+        // suggestion command.
+        let legacy = provider.provider_type.legacy_model_aliases();
+        for model in &provider.models {
+            if legacy.contains(&model.as_str()) {
+                warnings += 1;
+                w(format!(
+                    "! {}: model `{model}` is a legacy alias — see `swarm provider models {}` for current suggestions",
+                    provider.id,
+                    provider.provider_type.as_str()
+                ))?;
+            }
+        }
     }
 
     // ── Summary ──────────────────────────────────────────────────────────
@@ -351,6 +365,36 @@ mod tests {
         assert_eq!(code, 0, "{report}");
         assert!(report.contains("failed to parse"), "{report}");
         assert!(report.contains("boom"), "{report}");
+        assert!(report.contains("1 warning(s)"), "{report}");
+    }
+
+    #[test]
+    fn provider_with_legacy_model_warns_and_points_at_models_command() {
+        let mut provider = ProviderConfig::new(
+            "Old".to_string(),
+            ProviderType::DeepSeek,
+            None,
+            Some("sk-x".to_string()),
+        );
+        provider.id = "old".to_string();
+        provider.models = vec!["deepseek-chat".to_string(), "deepseek-v4-pro".to_string()];
+
+        let config = SwarmConfig::default();
+        let registry = BackendRegistry::new();
+        let (code, report) = doctor(&config, &registry, &[provider]);
+        assert_eq!(code, 0, "legacy models warn, never block: {report}");
+        assert!(
+            report.contains("! old: model `deepseek-chat` is a legacy alias"),
+            "{report}"
+        );
+        assert!(
+            report.contains("swarm provider models deepseek"),
+            "{report}"
+        );
+        assert!(
+            !report.contains("`deepseek-v4-pro` is a legacy"),
+            "{report}"
+        );
         assert!(report.contains("1 warning(s)"), "{report}");
     }
 

@@ -28,6 +28,7 @@ const VALID_PROVIDER_TYPES: &[&str] = &[
 ];
 
 const PROVIDER_USAGE: &str = "usage: swarm provider add ID --type TYPE [--name NAME] [--endpoint URL] [--models A,B,C] [--data-dir PATH]\n\
+       swarm provider models [TYPE]\n\
        swarm provider list [--data-dir PATH]\n\
        swarm provider key set ID [--from-env VAR] [--data-dir PATH]   (key is read from stdin, never argv)\n\
        swarm provider key check ID [--data-dir PATH]\n\
@@ -80,6 +81,7 @@ pub(crate) fn run_provider(
 ) -> Result<i32, String> {
     match args.first().map(String::as_str) {
         Some("add") => provider_add(registry, &args[1..], out),
+        Some("models") => provider_models(&args[1..], out),
         Some("list") => provider_list(registry, out),
         Some("key") => match args.get(1).map(String::as_str) {
             Some("set") => provider_key_set(registry, &args[2..], key_input, out),
@@ -90,9 +92,50 @@ pub(crate) fn run_provider(
         },
         Some("remove") => provider_remove(registry, &args[1..], out),
         _ => Err(format!(
-            "Error: unknown `provider` subcommand. Expected add, list, key, or remove.\n{PROVIDER_USAGE}"
+            "Error: unknown `provider` subcommand. Expected add, models, list, key, or remove.\n{PROVIDER_USAGE}"
         )),
     }
+}
+
+/// Closing line for any model-suggestion output: the lists above are
+/// best-effort snapshots, not a source of truth.
+pub(crate) const MODEL_CATALOG_NUDGE: &str =
+    "note: model catalogs change rapidly — verify against your provider's documentation before relying on these.";
+
+/// `swarm provider models [TYPE]` — print suggested model ids per provider
+/// type (legacy aliases marked), always closing with the staleness nudge.
+fn provider_models(args: &[String], out: &mut dyn Write) -> Result<i32, String> {
+    let types: Vec<&str> = match args.first().map(String::as_str) {
+        Some(token) => {
+            if ProviderType::from_str(token) == ProviderType::None {
+                return Err(format!(
+                    "Error: invalid provider type `{token}`. Valid types: {}.",
+                    VALID_PROVIDER_TYPES.join(", ")
+                ));
+            }
+            vec![token]
+        }
+        None => VALID_PROVIDER_TYPES.to_vec(),
+    };
+    let mut write =
+        |line: String| writeln!(out, "{line}").map_err(|e| format!("Error writing output: {e}"));
+    for token in types {
+        let provider_type = ProviderType::from_str(token);
+        write(format!("== {token} =="))?;
+        let suggested = provider_type.suggested_models();
+        let legacy = provider_type.legacy_model_aliases();
+        if suggested.is_empty() && legacy.is_empty() {
+            write("(no suggested models — any model id the endpoint serves works)".to_string())?;
+        }
+        for model in suggested {
+            write(format!("  {model}"))?;
+        }
+        for model in legacy {
+            write(format!("  {model} (legacy)"))?;
+        }
+    }
+    write(MODEL_CATALOG_NUDGE.to_string())?;
+    Ok(0)
 }
 
 fn provider_add(
@@ -105,6 +148,7 @@ fn provider_add(
     let mut name: Option<String> = None;
     let mut endpoint: Option<String> = None;
     let mut models: Vec<String> = Vec::new();
+    let mut models_given = false;
 
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -113,6 +157,7 @@ fn provider_add(
             "--name" => name = Some(required_value(&mut iter, "--name")?),
             "--endpoint" => endpoint = Some(required_value(&mut iter, "--endpoint")?),
             "--models" => {
+                models_given = true;
                 models = required_value(&mut iter, "--models")?
                     .split(',')
                     .map(str::trim)
@@ -146,10 +191,22 @@ fn provider_add(
         ));
     }
 
+    // No --models: default to the type's suggested catalog (when it has one)
+    // so the provider is usable immediately — and say so out loud.
+    let mut assumed_models = false;
+    if !models_given && models.is_empty() {
+        let suggested = parsed.suggested_models();
+        if !suggested.is_empty() {
+            models = suggested.iter().map(ToString::to_string).collect();
+            assumed_models = true;
+        }
+    }
+
     let existing = registry
         .get(&id)
         .map_err(|e| format!("Error reading provider registry: {e}"))?;
 
+    let models_joined = models.join(", ");
     let mut config =
         ProviderConfig::new(name.unwrap_or_else(|| id.clone()), parsed, endpoint, None);
     config.id = id.clone();
@@ -166,6 +223,15 @@ fn provider_add(
         .map_err(|e| format!("Error saving provider `{id}`: {e}"))?;
     writeln!(out, "saved provider `{id}` ({})", parsed.as_str())
         .map_err(|e| format!("Error writing output: {e}"))?;
+    if assumed_models {
+        writeln!(
+            out,
+            "no --models given; assumed suggested models for {}: {}\n{MODEL_CATALOG_NUDGE}",
+            parsed.as_str(),
+            models_joined
+        )
+        .map_err(|e| format!("Error writing output: {e}"))?;
+    }
     Ok(0)
 }
 
@@ -621,6 +687,99 @@ mod tests {
         assert_eq!(rest, vec!["list".to_string()]);
         assert_eq!(dir, Some(PathBuf::from("/tmp/x")));
         assert!(split_data_dir(&["--data-dir".to_string()]).is_err());
+    }
+
+    #[test]
+    fn models_lists_all_types_with_legacy_markers_and_nudge() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let (code, output) = run(&registry, &["models"], "");
+        assert_eq!(code.unwrap(), 0);
+        for t in VALID_PROVIDER_TYPES {
+            assert!(output.contains(&format!("== {t} ==")), "{output}");
+        }
+        assert!(output.contains("gpt-5.5"), "{output}");
+        assert!(output.contains("gpt-4o (legacy)"), "{output}");
+        assert!(output.contains("deepseek-chat (legacy)"), "{output}");
+        // Types with no catalog say so instead of printing nothing.
+        assert!(output.contains("no suggested models"), "{output}");
+        assert!(output.trim_end().ends_with(MODEL_CATALOG_NUDGE), "{output}");
+    }
+
+    #[test]
+    fn models_with_single_type_scopes_output() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let (code, output) = run(&registry, &["models", "deepseek"], "");
+        assert_eq!(code.unwrap(), 0);
+        assert!(output.contains("== deepseek =="), "{output}");
+        assert!(output.contains("deepseek-v4-flash"), "{output}");
+        assert!(output.contains("deepseek-reasoner (legacy)"), "{output}");
+        assert!(!output.contains("== openai =="), "{output}");
+        assert!(output.contains(MODEL_CATALOG_NUDGE), "{output}");
+    }
+
+    #[test]
+    fn models_with_unknown_type_errors_listing_valid_types() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let err = run(&registry, &["models", "frobnicator"], "")
+            .0
+            .unwrap_err();
+        assert!(err.contains("invalid provider type `frobnicator`"), "{err}");
+        for t in VALID_PROVIDER_TYPES {
+            assert!(err.contains(t), "missing `{t}` in: {err}");
+        }
+    }
+
+    #[test]
+    fn add_without_models_assumes_suggested_and_prints_nudge() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let (code, output) = run(&registry, &["add", "ds", "--type", "deepseek"], "");
+        assert_eq!(code.unwrap(), 0);
+        assert!(
+            output.contains(
+                "assumed suggested models for deepseek: deepseek-v4-flash, deepseek-v4-pro"
+            ),
+            "{output}"
+        );
+        assert!(output.contains(MODEL_CATALOG_NUDGE), "{output}");
+        let stored = registry.get("ds").unwrap().unwrap();
+        assert_eq!(
+            stored.models,
+            vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn add_without_models_for_catalogless_type_stays_empty_and_quiet() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let (code, output) = run(&registry, &["add", "local", "--type", "ollama"], "");
+        assert_eq!(code.unwrap(), 0);
+        assert!(!output.contains("assumed"), "{output}");
+        assert!(registry.get("local").unwrap().unwrap().models.is_empty());
+    }
+
+    #[test]
+    fn add_with_explicit_models_does_not_assume() {
+        let dir = tempdir().unwrap();
+        let registry = registry_in(dir.path());
+        let (code, output) = run(
+            &registry,
+            &["add", "ds", "--type", "deepseek", "--models", "my-model"],
+            "",
+        );
+        assert_eq!(code.unwrap(), 0);
+        assert!(!output.contains("assumed"), "{output}");
+        assert_eq!(
+            registry.get("ds").unwrap().unwrap().models,
+            vec!["my-model".to_string()]
+        );
     }
 
     #[test]

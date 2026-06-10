@@ -147,6 +147,7 @@ never written to disk and are read at runtime from the
 swarm provider add api --type openai --models gpt-5.5
 pbpaste | swarm provider key set api    # key is read from stdin — never argv
 swarm provider list                      # id, type, endpoint, models, key status
+swarm provider models openai             # suggested model ids (verify against provider docs)
 swarm provider key check api
 ```
 
