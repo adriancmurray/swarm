@@ -31,6 +31,15 @@ impl ToolRegistry {
         self.tools.keys().map(|s| s.as_str()).collect()
     }
 
+    /// Drop every registered tool whose name fails `keep`.
+    ///
+    /// Used to gate the tool set against a skill's `allowed-tools`: register the
+    /// built-ins, then `retain(|name| allowed.contains(name))` so the agent only
+    /// sees the permitted subset.
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.tools.retain(|name, _| keep(name));
+    }
+
     /// Convert all tools to OpenAI tool-calling format.
     pub fn to_openai_tools(&self) -> Vec<Value> {
         self.tools.values().map(|t| t.to_openai_tool()).collect()
@@ -102,6 +111,23 @@ mod tests {
         assert_eq!(names, vec!["echo"]);
         assert!(registry.get("echo").is_some());
         assert!(registry.get("missing").is_none());
+    }
+
+    #[test]
+    fn retain_drops_tools_not_matching_predicate() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(EchoTool));
+        assert_eq!(registry.list(), vec!["echo"]);
+
+        // Keep only a name the registry does not have → everything drops.
+        registry.retain(|name| name == "read_file");
+        assert!(registry.list().is_empty());
+        assert!(registry.get("echo").is_none());
+
+        // Re-register and keep the matching name → it stays.
+        registry.register(Arc::new(EchoTool));
+        registry.retain(|name| name == "echo");
+        assert_eq!(registry.list(), vec!["echo"]);
     }
 
     #[test]

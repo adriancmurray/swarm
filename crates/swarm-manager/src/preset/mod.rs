@@ -188,7 +188,15 @@ pub struct Preset {
     pub endpoint: Option<String>,
     /// System prompt.
     pub system_prompt: String,
-    /// Skill names whose instructions should be injected at chat time.
+    /// Skill names this preset would like injected.
+    ///
+    /// The live skill-injection path is the native backend descriptor's
+    /// `skills` field, which is resolved through [`crate::skills::SkillSet`]
+    /// (prompt composition + tool gating). Presets are not yet wired into
+    /// native dispatch, so this field is persisted for forward compatibility
+    /// but is NOT honoured at dispatch time — do not assume setting it gates
+    /// tools or injects guidance. When preset-driven native dispatch lands, it
+    /// will route these names through the same `SkillSet`.
     #[serde(default)]
     pub enabled_skills: Vec<String>,
     /// Opaque permission override payload (highest-priority rule layer).

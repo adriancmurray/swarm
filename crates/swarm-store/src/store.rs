@@ -85,6 +85,14 @@ pub fn providers_dir() -> Option<PathBuf> {
     swarm_home().map(|home| home.join("providers"))
 }
 
+/// Resolve the skills directory: `<swarm home>/skills`.
+///
+/// The home (user-global) source of `SKILL.md` skills. A native run also
+/// consults a project-local `<cwd>/.swarm/skills` that overrides this one.
+pub fn skills_dir() -> Option<PathBuf> {
+    swarm_home().map(|home| home.join("skills"))
+}
+
 /// Shared "cannot resolve the data root" error for `swarm_home()` callers.
 pub fn swarm_home_err() -> String {
     "Error: cannot resolve the swarm home (set SWARM_HOME or HOME)".to_string()
@@ -220,6 +228,7 @@ mod tests {
         assert_eq!(job_store_dir().unwrap(), override_dir.join("jobs"));
         assert_eq!(session_store_dir().unwrap(), override_dir.join("sessions"));
         assert_eq!(providers_dir(), Some(override_dir.join("providers")));
+        assert_eq!(skills_dir(), Some(override_dir.join("skills")));
 
         // SWARM_HOME unset → $HOME/.swarm.
         std::env::remove_var("SWARM_HOME");

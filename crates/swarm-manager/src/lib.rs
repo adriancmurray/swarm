@@ -10,6 +10,7 @@
 pub mod agent;
 pub mod preset;
 pub mod provider;
+pub mod skills;
 pub mod tools;
 
 #[cfg(feature = "runtime")]
@@ -21,5 +22,8 @@ pub use preset::{
 pub use provider::{
     create_provider, KeyStatus, LLMResponse, Message, Provider, ProviderConfig, ProviderError,
     ProviderRegistry, ProviderType, ToolCall, Usage,
+};
+pub use skills::{
+    load_skills, parse_skill, Skill, SkillError, SkillLoadIssue, SkillSelectionIssue, SkillSet,
 };
 pub use tools::{Tool, ToolRegistry};

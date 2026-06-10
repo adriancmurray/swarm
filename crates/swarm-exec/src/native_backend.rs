@@ -11,12 +11,13 @@
 //! Gated behind the `native` cargo feature so the default build pulls in no
 //! manager / async-runtime / HTTP dependency.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use swarm_manager::{
-    create_provider, Agent, AgentConfig, AgentError, KeyStatus, Provider, ProviderConfig,
-    ProviderError, ProviderRegistry, ToolRegistry,
+    create_provider, load_skills, Agent, AgentConfig, AgentError, KeyStatus, Provider,
+    ProviderConfig, ProviderError, ProviderRegistry, SkillSet, ToolRegistry,
 };
 
 use swarm_kernel::backend_abi::{
@@ -152,7 +153,11 @@ impl NativeBackend {
 
     /// Build the built-in tool set the native agent offers. File tools resolve
     /// against the request's working directory; there is no sandbox.
-    fn build_tools(req: &BackendRequest) -> ToolRegistry {
+    ///
+    /// When `allowed` is `Some(set)` the registry is gated to exactly those
+    /// tool names after the built-ins are registered: any tool whose `name()`
+    /// is not in the set is dropped. `None` leaves every built-in in place.
+    fn build_tools(req: &BackendRequest, allowed: Option<&HashSet<String>>) -> ToolRegistry {
         use swarm_manager::tools::{
             ExecTool, ListDirTool, ReadFileTool, WebFetchTool, WriteFileTool,
         };
@@ -166,7 +171,56 @@ impl NativeBackend {
         // none. The scripted-provider tests do not exercise tools, but a real
         // run gets a functional set.
         registry.register(Arc::new(WebFetchTool::default()));
+
+        if let Some(allowed) = allowed {
+            registry.retain(|name| allowed.contains(name));
+        }
         registry
+    }
+
+    /// Resolve the skill directories for a run: the project-local
+    /// `<cwd>/.swarm/skills` (highest priority) layered over the home
+    /// `skills_dir()`. The loader applies later-dir-wins, so the project dir is
+    /// passed last.
+    fn skill_dirs(req: &BackendRequest) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if let Some(home) = swarm_store::store::skills_dir() {
+            dirs.push(home);
+        }
+        dirs.push(req.cwd.join(".swarm").join("skills"));
+        dirs
+    }
+
+    /// Load and resolve the skills requested by `requested`, emitting any
+    /// malformed-skill or unknown-skill issues to the sink's stderr as
+    /// non-fatal warnings (never silently dropped).
+    fn resolve_skills(
+        &self,
+        requested: &[String],
+        req: &BackendRequest,
+        sink: &mut dyn BackendSink,
+    ) -> SkillSet {
+        if requested.is_empty() {
+            return SkillSet::default();
+        }
+        let dirs = Self::skill_dirs(req);
+        let (loaded, issues) = load_skills(&dirs);
+        for issue in &issues {
+            sink.stderr_chunk(&format!(
+                "warning: backend `{}` skipped malformed skill at {}: {}\n",
+                self.id,
+                issue.source.display(),
+                issue.error
+            ));
+        }
+        let set = SkillSet::resolve(&loaded, requested);
+        for unknown in set.unknown() {
+            sink.stderr_chunk(&format!(
+                "warning: backend `{}` requested skill `{}`, which was not found; run `swarm skills list`.\n",
+                self.id, unknown.requested
+            ));
+        }
+        set
     }
 
     /// Run the agent loop against a concrete provider and map the result onto
@@ -176,11 +230,17 @@ impl NativeBackend {
         &self,
         provider: Arc<dyn Provider>,
         model: Option<String>,
+        requested_skills: &[String],
         req: &BackendRequest,
         sink: &mut dyn BackendSink,
     ) -> Result<RunOutcome, BackendError> {
+        // Resolve skills first: the composed prompt and the tool gate both
+        // derive from the selected set. Issues are surfaced to stderr inside
+        // `resolve_skills` — never silently dropped.
+        let skillset = self.resolve_skills(requested_skills, req, sink);
+
         let mut config = AgentConfig {
-            system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
+            system_prompt: skillset.compose_system_prompt(DEFAULT_SYSTEM_PROMPT),
             ..AgentConfig::default()
         };
         // The agent loop bakes the model into the provider via
@@ -191,7 +251,8 @@ impl NativeBackend {
             config.model = m;
         }
 
-        let tools = Self::build_tools(req);
+        let allowed = skillset.allowed_tools();
+        let tools = Self::build_tools(req, allowed.as_ref());
         let mut agent = Agent::new(provider, tools, config);
 
         let turn = agent
@@ -322,7 +383,8 @@ impl AgentBackend for NativeBackend {
                     config.models = vec![m];
                 }
                 let provider = create_provider(&config).map_err(|e| self.map_provider_error(e))?;
-                self.run_with_provider(provider, model, req, sink)
+                let skills = descriptor.skills.clone();
+                self.run_with_provider(provider, model, &skills, req, sink)
             }
             Source::Provider {
                 provider,
@@ -332,7 +394,9 @@ impl AgentBackend for NativeBackend {
                     .model
                     .map(str::to_string)
                     .or_else(|| default_model.clone());
-                self.run_with_provider(Arc::clone(provider), model, req, sink)
+                // The injected-provider test seam carries no descriptor, so no
+                // skills are requested on this path.
+                self.run_with_provider(Arc::clone(provider), model, &[], req, sink)
             }
         }
     }
@@ -544,5 +608,43 @@ mod tests {
         let usage = outcome.token_usage.expect("token usage mapped");
         assert_eq!(usage.input, Some(12));
         assert_eq!(usage.output, Some(8));
+    }
+
+    #[test]
+    fn build_tools_unrestricted_registers_full_builtin_set() {
+        let cwd = tempfile::tempdir().unwrap();
+        let req = req("x", cwd.path());
+        let registry = NativeBackend::build_tools(&req, None);
+        let mut names = registry.list();
+        names.sort_unstable();
+        // exec, read_file, write_file, list_dir, web_fetch — no gating.
+        assert_eq!(
+            names,
+            vec!["exec", "list_dir", "read_file", "web_fetch", "write_file"]
+        );
+    }
+
+    #[test]
+    fn build_tools_gates_to_allowed_set_dropping_exec_and_web() {
+        let cwd = tempfile::tempdir().unwrap();
+        let req = req("x", cwd.path());
+        // A skill restricting to just read_file: exec / web / write / list drop.
+        let allowed: HashSet<String> = ["read_file".to_string()].into_iter().collect();
+        let registry = NativeBackend::build_tools(&req, Some(&allowed));
+        assert_eq!(registry.list(), vec!["read_file"]);
+        assert!(registry.get("exec").is_none());
+        assert!(registry.get("web_fetch").is_none());
+        assert!(registry.get("write_file").is_none());
+    }
+
+    #[test]
+    fn skill_dirs_layer_home_then_project_cwd() {
+        let cwd = tempfile::tempdir().unwrap();
+        let req = req("x", cwd.path());
+        let dirs = NativeBackend::skill_dirs(&req);
+        // The project-local cwd dir is last so it wins in the loader.
+        let last = dirs.last().unwrap();
+        assert!(last.ends_with(".swarm/skills"));
+        assert!(last.starts_with(cwd.path()));
     }
 }

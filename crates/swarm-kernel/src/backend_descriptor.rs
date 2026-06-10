@@ -66,6 +66,13 @@ pub struct BackendDescriptor {
     /// Provider id selecting the in-process harness (native kind).
     #[serde(default)]
     pub provider: Option<String>,
+    /// Skill names to load for this backend (native kind).
+    ///
+    /// Each name resolves to a `SKILL.md` under the skill dirs; the native
+    /// backend composes the selected skills into the system prompt and gates
+    /// the tool set to the union of their `allowed-tools`. Empty = no skills.
+    #[serde(default)]
+    pub skills: Vec<String>,
 }
 
 #[cfg(test)]
@@ -128,5 +135,17 @@ mod tests {
             serde_json::from_str(r#"{ "kind": "native", "provider": "api" }"#).unwrap();
         assert!(matches!(d.kind, BackendKind::Native));
         assert_eq!(d.provider.as_deref(), Some("api"));
+        // `skills` defaults to empty when absent.
+        assert!(d.skills.is_empty());
+    }
+
+    #[test]
+    fn parses_native_descriptor_with_skills() {
+        let d: BackendDescriptor = serde_json::from_str(
+            r#"{ "kind": "native", "provider": "api", "skills": ["reviewer", "doc"] }"#,
+        )
+        .unwrap();
+        assert!(matches!(d.kind, BackendKind::Native));
+        assert_eq!(d.skills, vec!["reviewer".to_string(), "doc".to_string()]);
     }
 }
