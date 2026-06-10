@@ -894,8 +894,7 @@ pub fn print_help(default_timeout_secs: u64) {
          usage: agent-swarm provider models [TYPE]\n\
          usage: agent-swarm provider list|remove ID|key set ID [--from-env VAR]|key check ID [--data-dir PATH]\n\
          usage: agent-swarm skills list [--dir PATH]...\n\
-         usage: agent-swarm doctor [--probe] [--data-dir PATH]\n\
-         usage: agent-swarm antigravity-config ensure [--config PATH] [--mcp PATH]\n\n\
+         usage: agent-swarm doctor [--probe] [--data-dir PATH]\n\n\
          Dispatch a prompt to a detected frontier partner agent.\n\n\
          positional arguments:\n\
            prompt             The prompt or instruction for the partner agent.\n\n\
@@ -935,8 +934,7 @@ pub fn print_help(default_timeout_secs: u64) {
            metadirector                Run the large-context metadirector contract in consult mode.\n\
            design                      Run a design-centered product/UI review discussion.\n\
            manifest                    Print service package metadata as JSON.\n\
-           mcp                         Serve Agent Swarm tools over MCP stdio.\n\
-           antigravity-config          Configure Antigravity MCP integration (ensure)."
+           mcp                         Serve Agent Swarm tools over MCP stdio."
     );
 }
 

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::cli::CliCommand;
 use crate::cli_commands::{
-    cmd_alerts, cmd_antigravity_config, cmd_cancel, cmd_result, cmd_runtime_processes,
-    cmd_session_events, cmd_session_transcript, cmd_sessions, cmd_status,
+    cmd_alerts, cmd_cancel, cmd_result, cmd_runtime_processes, cmd_session_events,
+    cmd_session_transcript, cmd_sessions, cmd_status,
 };
 use crate::cli_read_commands::{
     cmd_activity_record, cmd_automation_hooks, cmd_conductor_hook, cmd_eval_metadirector,
@@ -140,7 +140,6 @@ impl SwarmService {
                 CliCommand::Provider => return cmd_provider(&raw[1..]),
                 CliCommand::Skills => return cmd_skills(&raw[1..]),
                 CliCommand::Doctor => return cmd_doctor(&raw[1..]),
-                CliCommand::AntigravityConfig => return cmd_antigravity_config(&raw[1..]),
                 CliCommand::ScaffoldBackend => return cmd_scaffold_backend(&raw[1..]),
             }
         }
