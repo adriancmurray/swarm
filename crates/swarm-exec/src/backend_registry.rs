@@ -157,6 +157,16 @@ impl BackendRegistry {
         self.backends.insert(id, backend);
     }
 
+    /// Add (or replace) a custom [`AgentBackend`] trait implementation under
+    /// `id` — the library-embedding escape hatch for backends a descriptor
+    /// can't express. The `swarm` CLI itself extends via config descriptors;
+    /// this method is for programs that embed the engine as a library and
+    /// construct their own registry. The backend's own `id()` should agree
+    /// with the registry key for coherent error messages.
+    pub fn register(&mut self, id: impl Into<String>, backend: Box<dyn AgentBackend>) {
+        self.backends.insert(id.into(), backend);
+    }
+
     /// Resolve a backend by id, or a clear error listing the available ids.
     pub fn resolve(&self, id: &str) -> Result<&dyn AgentBackend, String> {
         self.backends.get(id).map(|b| b.as_ref()).ok_or_else(|| {
@@ -348,5 +358,60 @@ mod tests {
             reg.resolve("local").is_ok(),
             "native descriptor should resolve under the `native` feature"
         );
+    }
+
+    /// The library-embedding escape hatch: a custom `AgentBackend` trait impl
+    /// registers directly and runs through the same resolve path descriptors
+    /// use — no descriptor, no engine code change.
+    #[test]
+    fn register_accepts_custom_trait_impl() {
+        use swarm_kernel::backend_abi::{
+            BackendCaps, BackendError, BackendRequest, BackendSink, RunOutcome,
+        };
+
+        struct CannedBackend;
+        impl AgentBackend for CannedBackend {
+            fn id(&self) -> &str {
+                "canned"
+            }
+            fn ready(&self) -> Result<(), BackendError> {
+                Ok(())
+            }
+            fn run(
+                &self,
+                req: &BackendRequest,
+                sink: &mut dyn BackendSink,
+            ) -> Result<RunOutcome, BackendError> {
+                let text = format!("canned:{}", req.prompt);
+                sink.stdout_chunk(&text);
+                Ok(RunOutcome {
+                    stdout: text,
+                    ..Default::default()
+                })
+            }
+            fn capabilities(&self) -> BackendCaps {
+                BackendCaps::default()
+            }
+        }
+
+        let mut reg = BackendRegistry::with_builtins();
+        reg.register("canned", Box::new(CannedBackend));
+        let backend = reg.resolve("canned").unwrap();
+        assert!(backend.ready().is_ok());
+
+        let cwd = std::env::temp_dir();
+        let req = BackendRequest {
+            prompt: "hello",
+            model: None,
+            cwd: &cwd,
+            timeout: std::time::Duration::from_secs(5),
+            quiet: true,
+            allow_bypass_permissions: false,
+            env_policy: swarm_kernel::backend_abi::EnvPolicy::Inherit,
+            cancel: swarm_kernel::backend_abi::CancelToken::new(),
+        };
+        let mut sink = swarm_kernel::backend_abi::NullSink;
+        let out = backend.run(&req, &mut sink).unwrap();
+        assert_eq!(out.stdout, "canned:hello");
     }
 }

@@ -164,9 +164,21 @@ The four methods, in plain terms:
 
 ### Register it
 
-Construct your backend once and register it with the engine's backend registry
-so it can be selected by id. Build the project; your new backend is now
-dispatchable like any other.
+Trait impls are the **library-embedding** path: programs that use the engine
+as a Rust library construct their own registry and insert the backend with
+[`BackendRegistry::register`]:
+
+```rust
+use swarm_exec::backend_registry::BackendRegistry;
+
+let mut registry = BackendRegistry::from_config(&config); // builtins + your [backend.*] blocks
+registry.register("my-backend", Box::new(MyBackend::new()));
+// `my-backend` now resolves and dispatches like any other id.
+```
+
+(The stock `swarm` CLI binary extends via config descriptors only — it cannot
+load external Rust code at runtime. If a descriptor can't express your backend
+and you want it in the CLI, embed the engine in your own thin binary as above.)
 
 ---
 
