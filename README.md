@@ -1,80 +1,187 @@
 # swarm
 
-A multi-agent orchestrator in pure Rust. `swarm` routes tasks to coding-agent
-backends and composes them into higher-order runs: **fan-out** (parallel
-workers), **discuss** (multi-round structured discussion), and
-**manager-synthesis** (a manager agent verifies and synthesizes worker
-output). It also ships a **native single-agent harness** (`swarm-manager`) —
-provider registry, encrypted credential vault, and an agent loop — for running
-a model directly over HTTP without any external CLI.
+**Orchestrate multi-agent swarms in pure Rust.**
 
-## Layout
+`swarm` routes tasks to specialized coding agents and composes them into
+higher-order workflows: parallel fan-out, structured discussion, and manager
+synthesis. It is dependency-light, local-first, and built around descriptor
+configuration instead of hard-coded backend choices.
 
+[Website](https://swarm.dech.app) ·
+[Pages Preview](https://swarm-v57.pages.dev) ·
+[Authoring a Backend](docs/authoring-a-backend.md)
+
+```sh
+cargo run -p swarm-cli -- fanout "Review the auth module"
+cargo run -p swarm-cli -- discuss "Review the session model"
+cargo run -p swarm-cli -- metadirector "Plan the next verified slice"
 ```
+
+## Designed for Complex Agent Coordination
+
+Single-agent tasks have limits. `swarm` coordinates diverse coding models
+through explicit roles, session records, and manager synthesis.
+
+| Pattern | What it does |
+| --- | --- |
+| **fan-out** | Sends the same task to independent workers, then gives their outputs to a manager for synthesis. Useful for architecture, implementation, and review perspectives. |
+| **discuss** | Runs one or more rounds of role-based reasoning. The session produces inspectable transcripts and digest artifacts. |
+| **manager synthesis** | Uses a manager agent to compare worker outputs, separate accepted facts from risky claims, and return a compact decision packet. |
+
+## Engine Features
+
+- **Descriptor-first backends**: wire agents in TOML config, not source code.
+- **Native in-process harness**: `swarm-manager` provides an embedded agent loop,
+  provider registry, credential vault, presets, and built-in tools.
+- **MCP server layer**: expose reports, manifests, sessions, events,
+  transcripts, and dispatch surfaces through the MCP crate.
+- **Dependency-light defaults**: no async runtime, HTTP client, or TLS unless
+  you opt into the feature flags that need them.
+- **Inspectable sessions**: review prior work through `sessions`, `events`,
+  `transcript`, and `overview`.
+
+## Descriptor-First Backends
+
+Backends are ordinary descriptors. A CLI agent, hosted API, or native
+in-process provider can all be selected by the same routing rules:
+
+```toml
+[backend.codex]
+kind        = "cli"
+command     = "codex"
+args        = ["exec", "--model", "{model}"]
+prompt      = "stdin"
+stream      = "stdout-lines"
+ready_check = { binary = "codex" }
+
+[routes.implementation]
+preferred = ["codex", "claude:sonnet"]
+```
+
+There are three backend kinds:
+
+| Kind | What it wraps |
+| --- | --- |
+| `cli` | Any command-line agent, run as a subprocess. |
+| `openai-compatible` | Any HTTP endpoint that speaks `/v1/chat/completions`. |
+| `native` | The in-process `swarm-manager` harness. |
+
+Most integrations should be descriptors only. Drop into Rust only when you need
+a custom handshake, bespoke streaming protocol, non-standard auth, or
+multi-step orchestration that a descriptor cannot express.
+
+## Modular Crate Architecture
+
+```text
 crates/
-  swarm-contracts   # wire-stable contract types (ids, events, jobs, telemetry) — serde only
-  swarm-core        # pure repo-trait substrate
-  swarm-store       # filesystem-backed stores (jobs, sessions, telemetry)
-  swarm-kernel      # stateless leaf modules (resolver, classifier, backend ABI)
-  swarm-exec        # the engine: executor, orchestration, synthesis, sessions, monitor
-  swarm-mcp         # MCP server layer (stdio loop, schema, manifest)
-  swarm-cli         # CLI command dispatch
-  swarm-manager     # single-agent harness: providers, credential vault, agent loop
-  swarm-registrar   # optional generic JSON service-registry hook
+  swarm-contracts   wire-stable contract types: ids, events, jobs, telemetry
+  swarm-core        repository traits and pure domain substrate
+  swarm-store       filesystem-backed jobs, sessions, telemetry, and ledgers
+  swarm-kernel      stateless routing, config, backend ABI, and classification
+  swarm-exec        executor, orchestration, synthesis, sessions, and monitors
+  swarm-mcp         MCP server layer, schemas, manifests, reports, dispatch
+  swarm-cli         command parsing and CLI command dispatch
+  swarm-manager     native single-agent harness, providers, vault, tools
+  swarm-registrar   optional generic JSON service-registry hook
 ```
+
+The workspace keeps contracts, storage, routing, execution, transport, and
+native agent concerns separate so the engine stays easy to embed, test, and
+extend.
 
 ## Quickstart
 
+Compile the workspace:
+
 ```sh
-cargo build
+cargo build --release
 cargo test
 ```
 
-Copy `examples/config.example.toml` to `~/.swarm/config.toml` and edit it to
-declare your backends. Backends are **descriptor-first** — a backend is a TOML
-descriptor, not a code change:
+Create a config:
 
-- **`cli`** — wraps any local agent CLI (e.g. `claude --print`, `codex exec`):
-  command, args, output parsing declared in config.
-- **`openai`** — any OpenAI-compatible HTTP endpoint (build with
-  `--features openai` on `swarm-exec`).
-- **`native`** — the in-process `swarm-manager` agent loop (build with
-  `--features native` on `swarm-exec`).
+```sh
+mkdir -p ~/.swarm
+cp examples/config.example.toml ~/.swarm/config.toml
+```
 
-### Feature flags
+Define backend descriptors in `~/.swarm/config.toml`:
+
+```toml
+[backend.claude]
+kind        = "cli"
+command     = "claude"
+args        = ["--print", "--model", "{model}"]
+prompt      = "stdin"
+ready_check = { binary = "claude" }
+
+[settings]
+default_agent = "claude"
+```
+
+Run a structured discussion:
+
+```sh
+cargo run -p swarm-cli -- discuss \
+  --participant architecture=claude:sonnet \
+  --participant review=codex \
+  "Analyze auth.rs for timing vulnerabilities"
+```
+
+With no config, the engine uses built-in defaults and resolves public `claude`
+and `codex` CLIs when they are installed.
+
+## Core Commands
+
+| Command | Use it for |
+| --- | --- |
+| `run` | Run a single routed task. |
+| `fanout` / `swarm` | Send a task to parallel workers and synthesize the results. |
+| `discuss` | Run a structured multi-participant discussion. |
+| `metadirector` | Ask a manager agent to plan or synthesize from supplied context. |
+| `mcp` | Start the MCP server layer. |
+| `sessions`, `events`, `transcript`, `overview` | Inspect prior work and runtime output. |
+| `scaffold-backend` | Generate a descriptor and Rust trait skeleton for a new backend. |
+
+## Feature Flags
 
 | Feature | Crate | What it adds |
 | --- | --- | --- |
-| `openai` | `swarm-exec` | OpenAI-compatible HTTP backend (`ureq` + rustls) |
-| `native` | `swarm-exec` | In-process single-agent backend via `swarm-manager` |
-| `runtime` / `http` | `swarm-manager` | Async built-in tools / HTTP providers (`reqwest` + rustls) |
-| `registry` | `swarm-mcp` | Optional JSON service-registry self-registration |
-| `rmcp` | `swarm-mcp` | rmcp-based MCP transport |
+| `openai` | `swarm-exec` | OpenAI-compatible HTTP backend via `ureq` and rustls. |
+| `native` | `swarm-exec` | In-process single-agent backend through `swarm-manager`. |
+| `runtime` | `swarm-manager` | Async agent loop and built-in exec/file tools. |
+| `http` | `swarm-manager` | HTTP providers and web tool through `reqwest` and rustls. |
+| `registry` | `swarm-mcp` | Optional JSON service-registry self-registration. |
+| `rmcp` | `swarm-mcp` | rmcp-based MCP transport. |
 
-The default build is dependency-light: no async runtime, no HTTP, no TLS.
+## Threat Model & Safety Boundaries
 
-## Threat model — read before deploying
+`swarm` is an orchestrator, not a sandbox.
 
-`swarm` is **not a sandbox**:
+- A `cli` backend executes the command in your config with your user's
+  privileges.
+- API-backed prompts and outputs leave your machine and go to the endpoint you
+  configure.
+- Backend CLIs keep their own permission systems, if they have them. `swarm`
+  does not broker file or network access in v1.
+- `swarm-manager` can encrypt credentials at rest, but subprocess backends can
+  still read whatever their process permissions allow.
 
-- It **runs whatever your config says**. A `cli` backend descriptor executes
-  an arbitrary local command with your user's privileges. Treat your config
-  file like you treat your shell profile.
-- **Prompts leave your machine** when you use API-backed backends (`openai`,
-  `native` with HTTP providers). Task text, file excerpts, and worker output
-  are sent to whatever endpoint the descriptor points at.
-- There is **no permission broker in v1**. Backend CLIs run with their own
-  native permission systems (or none); swarm does not interpose on file or
-  network access.
-- Credentials stored by `swarm-manager` are encrypted at rest (OS keychain
-  with env-var fallback), but anything a backend process can read, it can
-  exfiltrate. Vet your backends.
+Treat backend config like a shell profile: review it, keep secrets out of the
+repo, and only run agents you trust in directories you are willing to expose.
 
-## Extending
+## Development
 
-To add a new backend kind (beyond what a descriptor can express), read
-[`docs/authoring-a-backend.md`](docs/authoring-a-backend.md) and use the
-`scaffold-backend` command to generate the starting point.
+```sh
+cargo fmt --all
+cargo test
+cargo test -p swarm-cli
+cargo test -p swarm-manager --features http
+```
+
+The CLI command surface is guarded by tests because external wrappers depend on
+exact command tokens. When changing a command name, update the stability guard
+intentionally.
 
 ## License
 

@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="swarm: A lightweight, multi-agent orchestrator in pure Rust. Route local CLIs, OpenAI-compatible endpoints, and native Rust providers through fan-out, discussion, and manager-synthesis workflows.">
+  <title>swarm — Pure Rust Multi-Agent Orchestrator</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="navbar" id="navbar">
+    <div class="navbar-container">
+      <a href="#" class="logo" id="nav-logo">
+        <svg class="logo-svg" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="5" r="2.5" class="node node-top" fill="currentColor"></circle>
+          <circle cx="5" cy="15" r="2.5" class="node node-left" fill="currentColor"></circle>
+          <circle cx="19" cy="15" r="2.5" class="node node-right" fill="currentColor"></circle>
+          <path d="M12 7.5L5.8 13.5M12 7.5L18.2 13.5M6.8 15.5H17.2M12 7.5V15" class="connection-line" stroke-dasharray="2 2"></path>
+          <circle cx="12" cy="15" r="1.5" class="node node-center" fill="currentColor"></circle>
+        </svg>
+        <span class="logo-text">swarm</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features" class="nav-link" id="link-features">Features</a>
+        <a href="#architecture" class="nav-link" id="link-architecture">Architecture</a>
+        <a href="#quickstart" class="nav-link" id="link-quickstart">Quickstart</a>
+        <a href="#threat-model" class="nav-link" id="link-threat-model">Safety</a>
+      </nav>
+      <div class="nav-actions">
+        <a href="https://github.com/adriancmurray/swarm" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" id="github-nav-btn">
+          <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.167 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.137 20.164 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+      <button class="mobile-menu-toggle" id="mobile-toggle" aria-label="Toggle navigation menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-glow"></div>
+    <div class="container hero-container">
+      <div class="hero-text-content">
+        <div class="pill-badge">v0.1.0 • Pure Rust</div>
+        <h1 class="hero-title">
+          Orchestrate Multi-Agent <span class="gradient-text">Swarms</span> in Pure Rust
+        </h1>
+        <p class="hero-subtitle">
+          Route tasks to specialized coding agents and compose them into higher-order workflows like parallel fan-out, structured discussions, and manager synthesis. Dependency-light and local-first.
+        </p>
+        <div class="hero-buttons">
+          <a href="#quickstart" class="btn btn-primary btn-lg" id="cta-get-started">Get Started</a>
+          <a href="https://github.com/adriancmurray/swarm" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-lg" id="cta-github">
+            <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.167 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.137 20.164 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+            </svg>
+            Star on GitHub
+          </a>
+        </div>
+      </div>
+      
+      <!-- Interactive Terminal Playground -->
+      <div class="hero-visual">
+        <div class="terminal">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot close"></span>
+              <span class="dot minimize"></span>
+              <span class="dot expand"></span>
+            </div>
+            <div class="terminal-title">swarm orchestration</div>
+          </div>
+          <div class="terminal-tabs">
+            <button class="tab-btn active" data-tab="fanout" id="btn-tab-fanout">fan-out</button>
+            <button class="tab-btn" data-tab="discuss" id="btn-tab-discuss">discuss</button>
+            <button class="tab-btn" data-tab="synthesis" id="btn-tab-synthesis">synthesis</button>
+          </div>
+          <div class="terminal-content">
+            
+            <!-- Fan-Out Content -->
+            <div class="tab-pane active" id="pane-fanout">
+              <div class="console-line prompt-line">
+                <span class="prompt-symbol">$</span> swarm fanout "Review the auth module"
+              </div>
+              <div class="console-line system-line">[info] Initializing fan-out run... Dispatching to 3 parallel worker agents.</div>
+              
+              <div class="flow-container">
+                <div class="flow-node root-node">
+                  <div class="node-label">Root Task</div>
+                  <div class="node-sub">User Login</div>
+                </div>
+                <div class="flow-connectors">
+                  <div class="line diagonal-up"></div>
+                  <div class="line straight"></div>
+                  <div class="line diagonal-down"></div>
+                </div>
+                <div class="flow-workers">
+                  <div class="flow-node worker-node active-pulse">
+                    <div class="node-label">Worker 1 (cli:codex)</div>
+                    <div class="node-sub">Schema & Database</div>
+                    <div class="node-status text-green">Done</div>
+                  </div>
+                  <div class="flow-node worker-node active-pulse" style="animation-delay: 0.5s;">
+                    <div class="node-label">Worker 2 (cli:claude)</div>
+                    <div class="node-sub">JWT Auth Logic</div>
+                    <div class="node-status text-green">Done</div>
+                  </div>
+                  <div class="flow-node worker-node active-pulse" style="animation-delay: 1s;">
+                    <div class="node-label">Worker 3 (api:openai)</div>
+                    <div class="node-sub">Login/Register Routes</div>
+                    <div class="node-status text-green">Done</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="console-line system-line text-green">[info] All workers finished. Manager synthesis written to the session report.</div>
+            </div>
+
+            <!-- Discuss Content -->
+            <div class="tab-pane" id="pane-discuss">
+              <div class="console-line prompt-line">
+                <span class="prompt-symbol">$</span> swarm discuss "Review the session model"
+              </div>
+              <div class="console-line system-line">[info] Initializing debate between Security Auditor and Lead Architect.</div>
+              
+              <div class="chat-sim">
+                <div class="chat-bubble left">
+                  <span class="chat-sender text-cyan">Architect</span>
+                  <p class="chat-text">"The design should separate authentication state, revocation, and audit events before implementation."</p>
+                </div>
+                <div class="chat-bubble right">
+                  <span class="chat-sender text-purple">Security Auditor</span>
+                  <p class="chat-text">"Good. Also call out which parts are runtime policy and which parts belong in storage contracts."</p>
+                </div>
+                <div class="chat-bubble left">
+                  <span class="chat-sender text-cyan">Architect</span>
+                  <p class="chat-text">"The storage contract stays small. The executor can route revocation checks through a configured backend."</p>
+                </div>
+                <div class="chat-bubble right">
+                  <span class="chat-sender text-purple">Security Auditor</span>
+                  <p class="chat-text">"That gives us a clean implementation plan and a concrete list of follow-up tests."</p>
+                </div>
+              </div>
+              
+              <div class="console-line system-line text-green">[info] Consensus reached after 2 rounds. Discussion recorded to sessions. Run complete.</div>
+            </div>
+
+            <!-- Synthesis Content -->
+            <div class="tab-pane" id="pane-synthesis">
+              <div class="console-line prompt-line">
+                <span class="prompt-symbol">$</span> swarm metadirector "Plan the next verified slice"
+              </div>
+              <div class="console-line system-line">[info] Manager agent spawning implementation and review pipeline...</div>
+              
+              <div class="synthesis-steps">
+                <div class="synth-step done">
+                  <span class="step-icon">1</span>
+                  <span class="step-title">Manager gathers source facts and accepted constraints</span>
+                </div>
+                <div class="synth-step done">
+                  <span class="step-icon">2</span>
+                  <span class="step-title">Workers return bounded architecture, implementation, and review notes</span>
+                </div>
+                <div class="synth-step review">
+                  <span class="step-icon">3</span>
+                  <span class="step-title">Manager rejects unsupported claims and keeps risky changes behind verification</span>
+                </div>
+                <div class="synth-step fix">
+                  <span class="step-icon">4</span>
+                  <span class="step-title">The next slice is scoped to files, commands, risks, and stop conditions</span>
+                </div>
+                <div class="synth-step final">
+                  <span class="step-icon">5</span>
+                  <span class="step-title">Session artifacts remain inspectable through CLI and MCP surfaces</span>
+                </div>
+              </div>
+              <div class="console-line system-line text-green">[info] Manager packet ready. Run complete.</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Patterns & Features Section -->
+  <section class="section features-section" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Designed for Complex Agent Coordination</h2>
+        <p class="section-desc">
+          Single-agent tasks have limits. Swarm coordinates diverse coding models through explicit roles, session records, and manager synthesis.
+        </p>
+      </div>
+
+      <!-- Orchestration Patterns Grid -->
+      <div class="patterns-grid">
+        <div class="pattern-card">
+          <div class="pattern-badge purple-glow">Pattern 01</div>
+          <div class="pattern-icon-wrapper">
+            <svg class="pattern-icon text-purple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M12 2L4 9M12 2l8 7M12 22l-8-7M12 22l8-7"></path>
+            </svg>
+          </div>
+          <h3>Parallel Fan-Out</h3>
+          <p>
+            Sends the same task to independent workers, then gives their outputs to a manager for synthesis. Useful for architecture, implementation, and review perspectives.
+          </p>
+        </div>
+
+        <div class="pattern-card">
+          <div class="pattern-badge cyan-glow">Pattern 02</div>
+          <div class="pattern-icon-wrapper">
+            <svg class="pattern-icon text-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 10h.01M12 10h.01M16 10h.01"></path>
+            </svg>
+          </div>
+          <h3>Structured Discuss</h3>
+          <p>
+            Configures multiple roles to reason through a problem over one or more rounds. The session produces inspectable transcripts and digest artifacts.
+          </p>
+        </div>
+
+        <div class="pattern-card">
+          <div class="pattern-badge green-glow">Pattern 03</div>
+          <div class="pattern-icon-wrapper">
+            <svg class="pattern-icon text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+          </div>
+          <h3>Manager Synthesis</h3>
+          <p>
+            Uses a manager agent to compare worker outputs, separate accepted facts from risky claims, and return a compact decision packet.
+          </p>
+        </div>
+      </div>
+
+      <!-- Feature Highlights -->
+      <div class="highlights-container">
+        <h3 class="highlight-section-title">Engine Features</h3>
+        <div class="highlights-grid">
+          <div class="highlight-item">
+            <div class="highlight-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+            </div>
+            <div>
+              <h4>Descriptor-First Backends</h4>
+              <p>Wired directly in configuration, not in source code. Any local shell command or HTTP client can be declared as an agent backend using simple TOML.</p>
+            </div>
+          </div>
+
+          <div class="highlight-item">
+            <div class="highlight-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+            </div>
+            <div>
+              <h4>Native In-Process Harness</h4>
+              <p>Includes `swarm-manager`, providing an embedded agent loop, API provider registry, and credential vault for running models natively without heavy processes.</p>
+            </div>
+          </div>
+
+          <div class="highlight-item">
+            <div class="highlight-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+            </div>
+            <div>
+              <h4>Secure Credential Storage</h4>
+              <p>Provider keys can be encrypted at rest through the OS keyring, with environment-variable fallback for systems without keyring support.</p>
+            </div>
+          </div>
+
+          <div class="highlight-item">
+            <div class="highlight-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </div>
+            <div>
+              <h4>MCP Server Layer</h4>
+              <p>Exposes reports, manifests, sessions, events, transcripts, and dispatch surfaces through the MCP crate.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Architecture Section -->
+  <section class="section arch-section" id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Modular Crate Architecture</h2>
+        <p class="section-desc">
+          Swarm keeps wire contracts, storage, routing, execution, transport, and native agent concerns in separate crates.
+        </p>
+      </div>
+
+      <div class="arch-layout">
+        <!-- Visual Interactive Crate Diagram -->
+        <div class="arch-visual">
+          <div class="crate-diagram">
+            <div class="diagram-column">
+              <div class="crate-node contract" data-crate="contracts">
+                <span class="crate-tag">Stable Wire Types</span>
+                <h4>swarm-contracts</h4>
+                <p>Events, jobs, telemetry (serde only)</p>
+              </div>
+              <div class="arrow-down"></div>
+              <div class="crate-node core" data-crate="core">
+                <span class="crate-tag">Substrate</span>
+                <h4>swarm-core</h4>
+                <p>Pure repo-trait substrate</p>
+              </div>
+            </div>
+
+            <div class="arrow-right-large"></div>
+
+            <div class="diagram-column">
+              <div class="crate-node kernel" data-crate="kernel">
+                <span class="crate-tag">Stateless leaf modules</span>
+                <h4>swarm-kernel</h4>
+                <p>Resolvers, classifiers, backend ABI</p>
+              </div>
+              <div class="arrow-down"></div>
+              <div class="crate-node exec" data-crate="exec">
+                <span class="crate-tag">The Engine</span>
+                <h4>swarm-exec</h4>
+                <p>Orchestration, sessions, executor</p>
+              </div>
+            </div>
+
+            <div class="arrow-right-large"></div>
+
+            <div class="diagram-column row-split">
+              <div class="split-target">
+                <div class="crate-node cli" data-crate="cli">
+                  <span class="crate-tag">Interface</span>
+                  <h4>swarm-cli</h4>
+                  <p>CLI command dispatch</p>
+                </div>
+                <div class="crate-node mcp" data-crate="mcp">
+                  <span class="crate-tag">Server Protocol</span>
+                  <h4>swarm-mcp</h4>
+                  <p>MCP server layer & registry</p>
+                </div>
+                <div class="crate-node manager" data-crate="manager">
+                  <span class="crate-tag">Harness</span>
+                  <h4>swarm-manager</h4>
+                  <p>Providers, credentials, agent loop</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Details Panel -->
+        <div class="arch-details" id="crate-details-panel">
+          <h3 id="details-crate-title">Hover a crate to inspect</h3>
+          <p id="details-crate-desc" class="muted-text">
+            Swarm splits operations into 9 distinct workspace crates. The default build is dependency-light: no async runtime, no HTTP, and no TLS by default. Select any crate node in the diagram to inspect its exact role in the system.
+          </p>
+          <div id="details-crate-meta" class="crate-meta-info hidden">
+            <span class="meta-label">Dependencies:</span> <span id="details-crate-deps">...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quickstart / Get Started Section -->
+  <section class="section quickstart-section" id="quickstart">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Quickstart</h2>
+        <p class="section-desc">
+          Get your swarm up and running in minutes. Install the CLI, configure your agent descriptors, and launch your first run.
+        </p>
+      </div>
+
+      <div class="steps-wrapper">
+        <!-- Step 1 -->
+        <div class="step-card">
+          <div class="step-badge">01</div>
+          <div class="step-content">
+            <h3>Compile the Workspace</h3>
+            <p>Clone the repository and build the engine using Cargo. The default build avoids async, HTTP, and TLS dependencies.</p>
+            <div class="code-block-wrapper">
+              <pre><code class="language-bash">cargo build --release
+cargo test</code></pre>
+              <button class="copy-button" data-copy="cargo build --release && cargo test" id="copy-btn-1" aria-label="Copy code block">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-card">
+          <div class="step-badge">02</div>
+          <div class="step-content">
+            <h3>Configure Your Backends</h3>
+            <p>Declare your agent execution endpoints by copying the example configuration into your local config file:</p>
+            <div class="code-block-wrapper">
+              <pre><code class="language-bash">mkdir -p ~/.swarm
+cp examples/config.example.toml ~/.swarm/config.toml</code></pre>
+              <button class="copy-button" data-copy="mkdir -p ~/.swarm && cp examples/config.example.toml ~/.swarm/config.toml" id="copy-btn-2" aria-label="Copy code block">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-card">
+          <div class="step-badge">03</div>
+          <div class="step-content">
+            <h3>Define Backend Descriptors</h3>
+            <p>Open <code>~/.swarm/config.toml</code> and specify how your local CLIs should run. No Rust coding required to add custom agents:</p>
+            <div class="code-block-wrapper">
+              <pre><code class="language-toml"># ~/.swarm/config.toml
+[backend.claude]
+kind    = "cli"
+command = "claude"
+args    = ["--print", "--model", "{model}"]
+prompt  = "stdin"
+ready_check = { binary = "claude" }
+
+[settings]
+default_agent = "claude"</code></pre>
+              <button class="copy-button" data-copy="# ~/.swarm/config.toml
+[backend.claude]
+kind    = &quot;cli&quot;
+command = &quot;claude&quot;
+args    = [&quot;--print&quot;, &quot;--model&quot;, &quot;{model}&quot;]
+prompt  = &quot;stdin&quot;
+ready_check = { binary = &quot;claude&quot; }
+
+[settings]
+default_agent = &quot;claude&quot;" id="copy-btn-3" aria-label="Copy code block">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step-card">
+          <div class="step-badge">04</div>
+          <div class="step-content">
+            <h3>Run the Engine</h3>
+            <p>Orchestrate runs from the command line. Launch a multi-round discussion with explicit participants:</p>
+            <div class="code-block-wrapper">
+              <pre><code class="language-bash">cargo run -p swarm-cli -- discuss \
+  --participant architecture=claude:sonnet \
+  --participant review=codex \
+  "Analyze auth.rs for timing vulnerabilities"</code></pre>
+              <button class="copy-button" data-copy="cargo run -p swarm-cli -- discuss --participant architecture=claude:sonnet --participant review=codex &quot;Analyze auth.rs for timing vulnerabilities&quot;" id="copy-btn-4" aria-label="Copy code block">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature Flags Sub-section -->
+      <div class="flags-container">
+        <h3>Workspace Feature Flags</h3>
+        <div class="flags-table-wrapper">
+          <table class="flags-table">
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Crate</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>openai</code></td>
+                <td><code>swarm-exec</code></td>
+                <td>Adds OpenAI-compatible HTTP backend using <code>ureq</code> + <code>rustls</code>.</td>
+              </tr>
+              <tr>
+                <td><code>native</code></td>
+                <td><code>swarm-exec</code></td>
+                <td>Enables in-process agent execution loops via <code>swarm-manager</code>.</td>
+              </tr>
+              <tr>
+                <td><code>runtime</code> / <code>http</code></td>
+                <td><code>swarm-manager</code></td>
+                <td>Equips the agent manager with HTTP API clients (<code>reqwest</code> + <code>rustls</code>).</td>
+              </tr>
+              <tr>
+                <td><code>registry</code></td>
+                <td><code>swarm-mcp</code></td>
+                <td>Allows service self-registration with JSON registries.</td>
+              </tr>
+              <tr>
+                <td><code>rmcp</code></td>
+                <td><code>swarm-mcp</code></td>
+                <td>Enables the rmcp-based MCP transport.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Threat Model & Safety Section -->
+  <section class="section safety-section" id="threat-model">
+    <div class="container">
+      <div class="warning-banner">
+        <div class="warning-icon-bg">
+          <svg class="warning-large-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <div class="warning-text">
+          <h2 class="warning-heading">Threat Model & Safety Boundaries</h2>
+          <p class="warning-sub">
+            Swarm is an orchestrator, not a sandbox. Operators should understand how backend processes, prompts, and credentials behave before deploying it.
+          </p>
+        </div>
+      </div>
+
+      <div class="safety-grid">
+        <div class="safety-card">
+          <div class="safety-header">
+            <span class="safety-num text-red">01</span>
+            <h3>Arbitrary Subprocesses</h3>
+          </div>
+          <p>
+            The <code>cli</code> backend descriptor runs arbitrary commands exactly as declared. It inherits the host environment and executes with your user's exact privileges. Treat your <code>config.toml</code> with the same security classification as your shell profile.
+          </p>
+        </div>
+
+        <div class="safety-card">
+          <div class="safety-header">
+            <span class="safety-num text-red">02</span>
+            <h3>Prompt & Code Leakage</h3>
+          </div>
+          <p>
+            When using network-based API endpoints, tasks, prompts, file contents, and workspace context may leave your local system and go to the configured provider.
+          </p>
+        </div>
+
+        <div class="safety-card">
+          <div class="safety-header">
+            <span class="safety-num text-red">03</span>
+            <h3>No Permission Broker</h3>
+          </div>
+          <p>
+            Swarm provides no internal sandbox or permission broker in v1. Backend subprocesses run with their own local filesystem and network permissions.
+          </p>
+        </div>
+
+        <div class="safety-card">
+          <div class="safety-header">
+            <span class="safety-num text-red">04</span>
+            <h3>Credential Vault Boundaries</h3>
+          </div>
+          <p>
+            <code>swarm-manager</code> can encrypt credentials at rest, but subprocess backends can still read whatever their process permissions allow. Vet external CLI wrappers.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="section cta-action-section">
+    <div class="container cta-container">
+      <div class="cta-card">
+        <h2 class="cta-title">Ready to build your agent network?</h2>
+        <p class="cta-subtitle">
+          Clone swarm, review the safety model, and start composing reliable multi-agent workflows.
+        </p>
+        <div class="cta-buttons">
+          <a href="https://github.com/adriancmurray/swarm" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg" id="bottom-github-cta">
+            <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.167 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.137 20.164 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+            </svg>
+            Clone Repository
+          </a>
+          <a href="#quickstart" class="btn btn-outline btn-lg" id="bottom-quickstart-cta">View Setup Docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-container">
+      <div class="footer-info">
+        <div class="logo">
+          <span class="logo-text">swarm</span>
+        </div>
+        <p class="footer-desc">A pure Rust multi-agent orchestrator. Local-first, lightweight, extensible.</p>
+      </div>
+      <div class="footer-bottom">
+        <p class="copyright">© 2026 Swarm. Open source under the MIT or Apache-2.0 License.</p>
+        <div class="footer-links">
+          <a href="https://github.com/adriancmurray/swarm" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="#threat-model">Security</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Javascript -->
+  <script src="script.js"></script>
+</body>
+</html>
