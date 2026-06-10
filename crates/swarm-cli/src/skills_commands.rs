@@ -66,7 +66,9 @@ fn parse_dirs(raw: &[String]) -> Result<Vec<PathBuf>, String> {
                 .ok_or_else(|| "Error: --dir requires a path.".to_string())?;
             dirs.push(PathBuf::from(value));
         } else {
-            return Err(format!("Error: unexpected argument `{arg}`.\n{SKILLS_USAGE}"));
+            return Err(format!(
+                "Error: unexpected argument `{arg}`.\n{SKILLS_USAGE}"
+            ));
         }
     }
     Ok(dirs)
@@ -158,7 +160,11 @@ mod tests {
     #[test]
     fn list_reports_malformed_skills() {
         let dir = tempfile::tempdir().unwrap();
-        write_skill(dir.path(), "good", "---\nname: good\ndescription: d\n---\nok");
+        write_skill(
+            dir.path(),
+            "good",
+            "---\nname: good\ndescription: d\n---\nok",
+        );
         write_skill(dir.path(), "bad", "---\nname: bad\nno closing fence\n");
         let (_, output) = run(&["list", "--dir", dir.path().to_str().unwrap()]);
         assert!(output.contains("good\n"), "{output}");

@@ -603,7 +603,9 @@ mod tests {
         let tools = set.allowed_tools().unwrap();
         assert_eq!(
             tools,
-            ["read_file".to_string()].into_iter().collect::<HashSet<_>>()
+            ["read_file".to_string()]
+                .into_iter()
+                .collect::<HashSet<_>>()
         );
     }
 
