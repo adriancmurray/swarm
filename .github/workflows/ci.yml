@@ -22,6 +22,32 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Fails the build if any private-system name leaks into tracked source.
+      # These are internal project/agent names that have no place in the public engine.
+      # Only run once (ubuntu) — the check is OS-independent, no need to 2x the matrix.
+      # `dech` is allowed solely in the README's project website link `swarm.dech.app`;
+      # that one literal is excluded and nothing else.
+      - name: No private-system names
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -uo pipefail
+          status=0
+          # Word-boundary, case-insensitive. Excludes:
+          #  - Cargo.lock (transitive crate names we don't control)
+          #  - this workflow file (it must name the banned words to ban them)
+          if git grep -niwE 'agy|antigravity|nanobot|abzu|mycel|mneme|federation' -- ':!Cargo.lock' ':!.github/workflows/ci.yml'; then
+            echo "::error::private-system name found in tracked source (see lines above)"
+            status=1
+          fi
+          # `dech` separately: allow only the website link swarm.dech.app.
+          dech_hits="$(git grep -niwE 'dech' -- ':!Cargo.lock' ':!.github/workflows/ci.yml' | grep -v 'swarm\.dech\.app' || true)"
+          if [ -n "$dech_hits" ]; then
+            echo "$dech_hits"
+            echo "::error::'dech' found outside the allowed swarm.dech.app website link"
+            status=1
+          fi
+          exit "$status"
+
       - name: No Python files
         run: test -z "$(find . -name '*.py' -not -path './.git/*' -not -path './target/*')"
 
