@@ -182,6 +182,43 @@ pub fn render_context_block(context: &serde_json::Value) -> Option<String> {
 /// Builds the per-worker prompt. When `context` is `Some`, the auto-gathered
 /// context block is appended after the task text. When `None`, the output is
 /// byte-identical to the pre-injection implementation (OFF path is the default).
+/// A completed worker's result as a typed channel into synthesis.
+///
+/// Replaces the anonymous `(WorkerSpec, i32, RunOutcome)` tuple that fed the
+/// manager-prompt and artifact builders. The key difference is `gate`: the
+/// [`WorkerEvidenceGate`] is computed **once** at construction
+/// ([`WorkerOutput::new`]) and stored, instead of being recomputed ad hoc inside
+/// each builder. That makes the verdict structurally available to any downstream
+/// collapse — manager synthesis today; a deterministic `judge()` / best-of-N
+/// selector later — which is the precondition for turning the gate from advisory
+/// text into control flow.
+#[derive(Debug, Clone)]
+pub struct WorkerOutput {
+    /// The role + agent spec that ran.
+    pub worker: WorkerSpec,
+    /// The resolved exit code (normalized by the fallback loop; a timeout maps to
+    /// a nonzero code), as reported to the manager.
+    pub exit_code: i32,
+    /// The raw backend outcome (stdout/stderr/timed_out/…).
+    pub outcome: RunOutcome,
+    /// The evidence gate, computed once from `(exit_code, outcome)`.
+    pub gate: WorkerEvidenceGate,
+}
+
+impl WorkerOutput {
+    /// Build from a completed run, computing the evidence gate from the outcome.
+    pub fn new(worker: WorkerSpec, exit_code: i32, outcome: RunOutcome) -> Self {
+        let gate =
+            assess_worker_output(exit_code, outcome.timed_out, &outcome.stdout, &outcome.stderr);
+        Self {
+            worker,
+            exit_code,
+            outcome,
+            gate,
+        }
+    }
+}
+
 pub fn build_worker_prompt(task: &str, role: &str, context: Option<&str>) -> String {
     let mut prompt = format!(
         "You are the `{role}` worker in a stacked agent swarm.\n\
@@ -280,7 +317,7 @@ fn normalize_persona(value: &str) -> String {
 /// implementation (OFF path is the default).
 pub fn build_manager_prompt(
     task: &str,
-    results: &[(WorkerSpec, i32, RunOutcome)],
+    workers: &[WorkerOutput],
     context: Option<&str>,
 ) -> String {
     let mut prompt = format!(
@@ -297,8 +334,11 @@ pub fn build_manager_prompt(
         prompt.push_str(ctx);
     }
     prompt.push_str("\n\nWorker outputs:\n");
-    for (worker, code, output) in results {
-        let gate = assess_worker_output(*code, output.timed_out, &output.stdout, &output.stderr);
+    for wo in workers {
+        let worker = &wo.worker;
+        let code = wo.exit_code;
+        let output = &wo.outcome;
+        let gate = &wo.gate;
         prompt.push_str(&format!(
             "\n--- worker: {} ({}) exit={} timed_out={} gate={} blockers={} citations={} evidence_gaps={} flags={} ---\n",
             worker.role,
@@ -342,7 +382,7 @@ pub fn build_manager_prompt(
 }
 
 pub fn build_swarm_result_artifact(
-    results: &[(WorkerSpec, i32, RunOutcome)],
+    workers: &[WorkerOutput],
     manager: &RunOutcome,
 ) -> String {
     let mut artifact = String::from("# Agent Swarm Result\n\n## Manager Synthesis\n\n");
@@ -359,7 +399,10 @@ pub fn build_swarm_result_artifact(
     }
 
     artifact.push_str("\n## Worker Outputs\n");
-    for (worker, code, output) in results {
+    for wo in workers {
+        let worker = &wo.worker;
+        let code = wo.exit_code;
+        let output = &wo.outcome;
         artifact.push_str(&format!(
             "\n### {} ({})\n\nexit={} timed_out={}\n\n",
             worker.role,
@@ -384,12 +427,15 @@ pub fn build_swarm_result_artifact(
 
 pub fn build_swarm_transcript(
     task: &str,
-    results: &[(WorkerSpec, i32, RunOutcome)],
+    workers: &[WorkerOutput],
     manager: &RunOutcome,
 ) -> String {
     let mut transcript = format!("# Agent Swarm Fan-Out\n\nTask:\n{task}\n\n");
     transcript.push_str("## Workers\n");
-    for (worker, code, output) in results {
+    for wo in workers {
+        let worker = &wo.worker;
+        let code = wo.exit_code;
+        let output = &wo.outcome;
         transcript.push_str(&format!(
             "\n### {} ({})\n\nexit={} timed_out={}\n\n",
             worker.role,
@@ -685,11 +731,15 @@ mod tests {
         }
     }
 
+    fn wo(role: &str, code: i32, out: RunOutcome) -> WorkerOutput {
+        WorkerOutput::new(worker(role), code, out)
+    }
+
     // preview_for_event test relocated to swarm-kernel::format tests (P5-S2.5)
 
     #[test]
     fn build_manager_prompt_includes_worker_status_and_stderr() {
-        let results = vec![(worker("qa"), 1, output("found bug", "warning", false))];
+        let results = vec![wo("qa", 1, output("found bug", "warning", false))];
         let prompt = build_manager_prompt("audit", &results, None);
 
         assert!(prompt.contains("Original task:\naudit"));
@@ -698,6 +748,34 @@ mod tests {
             .contains("flags=NONZERO_EXIT,NO_CITATIONS,MISSING_PACKET_SECTIONS,MISSING_PROOF_OF_WORK,BLOCKER_SIGNAL"));
         assert!(prompt.contains("found bug"));
         assert!(prompt.contains("stderr:\nwarning"));
+    }
+
+    /// Keystone property: the manager prompt renders the gate that is *stored on*
+    /// the `WorkerOutput` (computed once at construction), not a recomputation —
+    /// this is what lets a future `judge()`/selector branch on the same verdict
+    /// the manager sees. The expected line is derived from the stored gate, so
+    /// this pins the typed channel rather than `assess_worker_output`'s internals.
+    #[test]
+    fn manager_prompt_renders_the_stored_worker_gate() {
+        let w = wo("qa", 1, output("found bug", "warning", false));
+        let g = w.gate.clone();
+        let prompt = build_manager_prompt("audit", std::slice::from_ref(&w), None);
+        let expected = format!(
+            "--- worker: qa (codex) exit=1 timed_out=false gate={} blockers={} citations={} evidence_gaps={} flags={} ---",
+            g.manager_status(),
+            g.has_blockers,
+            g.citation_count,
+            g.evidence_gap_count,
+            if g.flags.is_empty() {
+                "none".to_string()
+            } else {
+                g.flags.join(",")
+            },
+        );
+        assert!(
+            prompt.contains(&expected),
+            "manager prompt must render the WorkerOutput's stored gate verbatim.\nexpected line: {expected}\n--- prompt ---\n{prompt}"
+        );
     }
 
     #[test]
@@ -779,7 +857,7 @@ Tests
         let stdout = format!(
             "Findings\n- Uncited claim.\nRisks\n- None.\nSteps\n- Inspect.\nBlockers\n- None.\nTests\n- Run tests.\n{long_tail}"
         );
-        let results = vec![(worker("qa"), 0, output(&stdout, "", false))];
+        let results = vec![wo("qa", 0, output(&stdout, "", false))];
         let prompt = build_manager_prompt("audit", &results, None);
 
         assert!(prompt.contains("gate=UNVERIFIED"));
@@ -830,7 +908,7 @@ Tests
     #[test]
     fn build_swarm_artifacts_handle_empty_outputs() {
         let manager = output("", "", false);
-        let results = vec![(worker("architecture"), 0, output("", "", false))];
+        let results = vec![wo("architecture", 0, output("", "", false))];
 
         let result = build_swarm_result_artifact(&results, &manager);
         let transcript = build_swarm_transcript("plan", &results, &manager);
@@ -936,7 +1014,7 @@ Tests
     fn build_manager_prompt_off_path_produces_expected_structure_and_health_rules() {
         // OFF path (context = None): Original task section appears immediately,
         // no context block present.
-        let results = vec![(worker("qa"), 0, output("looks good", "", false))];
+        let results = vec![wo("qa", 0, output("looks good", "", false))];
         let prompt = build_manager_prompt("audit", &results, None);
         assert!(prompt.contains("Original task:\naudit\n\nWorker outputs:"));
         assert!(prompt.contains("Treat timed-out, nonzero-exit, truncated"));
@@ -965,7 +1043,7 @@ Tests
         // ON path: context block appears after task text, before worker outputs.
         let ctx =
             "--- local context (auto-gathered, cwd: /tmp) ---\nfoo.rs: bar\n--- end context ---\n";
-        let results = vec![(worker("qa"), 0, output("all good", "", false))];
+        let results = vec![wo("qa", 0, output("all good", "", false))];
         let prompt = build_manager_prompt("plan", &results, Some(ctx));
         assert!(prompt.contains("--- local context"));
         let ctx_pos = prompt.find("--- local context").unwrap();

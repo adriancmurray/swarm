@@ -48,7 +48,7 @@ use crate::synthesis::{
     build_discussion_digest, build_discussion_manager_prompt, build_discussion_turn_prompt,
     build_docs_prompt, build_manager_prompt, build_profile_helper_prompt,
     build_swarm_result_artifact, build_swarm_transcript, build_worker_prompt,
-    capped_manager_output, preview_for_event, render_context_block,
+    capped_manager_output, preview_for_event, render_context_block, WorkerOutput,
 };
 
 pub fn run_partner_foreground(
@@ -484,7 +484,7 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
                 if output.timed_out || code != 0 {
                     failed = true;
                 }
-                worker_results.push((worker, code, output));
+                worker_results.push(WorkerOutput::new(worker, code, output));
             }
             Ok((worker, Err(err))) => {
                 failed = true;
