@@ -523,6 +523,30 @@ pub(crate) fn cmd_overview() -> Result<i32, String> {
     Ok(0)
 }
 
+/// `run-hash <session-id>`: print the canonical run-hash of a session's event log.
+///
+/// The hash is a deterministic fingerprint of the run's *functional* content —
+/// volatile fields (seq/ts/pid/paths/…) and cross-thread ordering are stripped by
+/// the canonicalizer. Two runs of the same logical work hash identically, so this
+/// is the CLI handle for parity / cache-replay checks: run a task twice (with
+/// `[reliability].cache` on) and compare the two hashes.
+pub(crate) fn cmd_run_hash(raw: &[String]) -> Result<i32, String> {
+    let id = raw
+        .first()
+        .ok_or_else(|| "Error: run-hash requires a session id".to_string())?;
+    let path = swarm_store::store::session_dir(id)?.join("events.jsonl");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Error reading {}: {err}", path.display()))?;
+    let events: Vec<swarm_contracts::events::SessionEventV2> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let hash = swarm_contracts::canonical::canonical_run_hash(&events);
+    println!("{hash}  {id}  ({} events)", events.len());
+    Ok(0)
+}
+
 pub(crate) fn cmd_insights() -> Result<i32, String> {
     println!("{}", json_text(insights_payload()));
     Ok(0)

@@ -11,7 +11,7 @@ use crate::cli_commands::{
 use crate::cli_read_commands::{
     cmd_activity_record, cmd_automation_hooks, cmd_conductor_hook, cmd_eval_metadirector,
     cmd_feedback, cmd_insights, cmd_ledger, cmd_manifest, cmd_overview, cmd_presets, cmd_profiles,
-    cmd_proposal_vote, cmd_proposals, cmd_propose, cmd_recommend,
+    cmd_proposal_vote, cmd_proposals, cmd_propose, cmd_recommend, cmd_run_hash,
 };
 use crate::doctor::cmd_doctor;
 use crate::provider_commands::cmd_provider;
@@ -132,6 +132,7 @@ impl SwarmService {
                 }
                 CliCommand::Events => return cmd_session_events(&raw[1..]),
                 CliCommand::Transcript => return cmd_session_transcript(&raw[1..]),
+                CliCommand::RunHash => return cmd_run_hash(&raw[1..]),
                 CliCommand::ConductorHook => return cmd_conductor_hook(),
                 CliCommand::ActivityRecord => return cmd_activity_record(&raw[1..]),
                 CliCommand::JobWorker => return cmd_job_worker(&raw[1..]),
