@@ -488,6 +488,21 @@ pub fn recommendations_from_stats(
     .collect()
 }
 
+/// Quantize a `[0.0, 1.0]` agent score to a total-orderable integer at 6
+/// decimal places. This is the single comparator key used by both ranking
+/// sites below: it removes the `partial_cmp` `None`/NaN edge (which silently
+/// collapsed to `Ordering::Equal` and made the winner order-dependent) and
+/// folds away float noise so two effectively-equal scores tie cleanly into the
+/// explicit `(runs, agent)` tiebreak. NaN — not reachable today, since
+/// `aggregate_stats` builds `score` from a finite ratio clamped to `[0,1]` —
+/// maps to the floor so a malformed stat can never win a ranking.
+fn score_key(score: f64) -> i64 {
+    if score.is_nan() {
+        return 0;
+    }
+    (score * 1_000_000.0).round() as i64
+}
+
 pub fn best_agent_for_role(
     role: &str,
     observations: &[AgentObservation],
@@ -497,13 +512,57 @@ pub fn best_agent_for_role(
     stats
         .iter()
         .filter(|stat| stat.role == role || (role == "manager" && stat.role == "manager"))
+        // Total order via quantized score, then the same tiebreak priority as
+        // `learned_candidates_for_role`: more runs win, then lexically-smaller
+        // agent name. `max_by` keeps the *last* of equal-comparing elements, so
+        // the name tiebreak is reversed (`b.cmp(&a)`) to make the smallest name
+        // the winner regardless of `aggregate_stats` ordering.
         .max_by(|a, b| {
-            a.score
-                .partial_cmp(&b.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            score_key(a.score)
+                .cmp(&score_key(b.score))
+                .then_with(|| a.runs.cmp(&b.runs))
+                .then_with(|| b.agent.cmp(&a.agent))
         })
         .map(|stat| stat.agent.clone())
         .unwrap_or_else(|| default_agent_for_role(role).to_string())
+}
+
+/// Ranked agent candidates for a role, learned from observed outcomes and
+/// explicit feedback. This is the read side of the Phase-2 learned-routing
+/// cutover (see `routing_repo.rs:1-15`): dispatch calls this when a role's
+/// fallback chain is otherwise unset, and uses the result to fill the gap.
+///
+/// Returns agents in descending score order, filtered to those with at least
+/// `min_observations` runs — so a cold telemetry store yields nothing and the
+/// caller falls back to the static `DEFAULT_FALLBACK_CHAIN` unchanged. Ties on
+/// score are broken by agent name (ascending) for deterministic output across
+/// runs and tests; `runs` is a secondary tiebreaker to favor more-tested agents
+/// when scores are within floating-point noise of each other.
+///
+/// Note the role match mirrors [`best_agent_for_role`]: only an exact role
+/// match counts (the `"manager"` special-case there is redundant since it is
+/// already an exact match, and is intentionally not replicated here).
+pub fn learned_candidates_for_role(
+    role: &str,
+    observations: &[AgentObservation],
+    feedback: &[AgentFeedback],
+    min_observations: u32,
+) -> Vec<String> {
+    let mut stats = aggregate_stats(observations, feedback)
+        .into_iter()
+        .filter(|stat| stat.role == role && stat.runs >= min_observations as u64)
+        .collect::<Vec<_>>();
+    // Sort by score desc; tie-break on more runs, then agent name asc for
+    // deterministic output regardless of BTreeMap iteration order. Score is
+    // compared via the quantized `score_key` so the ordering is total (no
+    // `partial_cmp` NaN/`None` edge) and float noise can't perturb the tiebreak.
+    stats.sort_by(|a, b| {
+        score_key(b.score)
+            .cmp(&score_key(a.score))
+            .then_with(|| b.runs.cmp(&a.runs))
+            .then_with(|| a.agent.cmp(&b.agent))
+    });
+    stats.into_iter().map(|stat| stat.agent).collect()
 }
 
 fn default_agent_for_role(role: &str) -> &'static str {
@@ -737,5 +796,156 @@ mod tests {
         let re_encoded = serde_json::to_string(&proposal).unwrap();
         let val: serde_json::Value = serde_json::from_str(&re_encoded).unwrap();
         assert_eq!(val["id"], "proposal-deadbeef");
+    }
+
+    // ── learned_candidates_for_role ─────────────────────────────────────────
+
+    /// Minimal observation builder for the learned-routing tests. `fail` flips
+    /// exit_code; `duration_ms` influences the speed penalty.
+    fn obs(role: &str, agent: &str, n: u128, fail: bool, duration_ms: u128) -> AgentObservation {
+        AgentObservation {
+            schema: "agent-swarm/observation/v1".into(),
+            ts_ms: n,
+            mode: "consult".into(),
+            session_id: None,
+            role: role.into(),
+            agent: agent.into(),
+            cwd: "/tmp".into(),
+            status: if fail { "failed" } else { "completed" }.into(),
+            exit_code: if fail { 1 } else { 0 },
+            timed_out: false,
+            duration_ms,
+            prompt_bytes: 100,
+            stdout_bytes: 200,
+            stderr_bytes: 0,
+            input_tokens: None,
+            output_tokens: None,
+        }
+    }
+
+    /// Cold-start: no telemetry at all → empty candidate list (caller falls
+    /// back to the static DEFAULT_FALLBACK_CHAIN, unchanged from today).
+    #[test]
+    fn learned_candidates_empty_when_no_telemetry() {
+        let got = learned_candidates_for_role("architecture", &[], &[], 3);
+        assert!(got.is_empty(), "cold telemetry must yield no candidates");
+    }
+
+    /// Below the min_observations threshold → empty. This keeps a single lucky
+    /// run from promoting an agent over the configured default.
+    #[test]
+    fn learned_candidates_empty_below_min_observations() {
+        // Only 2 runs for claude:sonnet, but min_observations=3.
+        let observations = vec![
+            obs("architecture", "claude:sonnet", 1, false, 5_000),
+            obs("architecture", "claude:sonnet", 2, false, 5_000),
+        ];
+        let got = learned_candidates_for_role("architecture", &observations, &[], 3);
+        assert!(got.is_empty(), "below-threshold data must yield no candidates");
+    }
+
+    /// Seeded telemetry → candidates sorted by score descending. Gemini wins
+    /// here (1/1 success, no feedback) over claude:sonnet (1 fail in 3 runs),
+    /// so the order is [gemini, claude:sonnet].
+    #[test]
+    fn learned_candidates_sorted_by_score_descending() {
+        let observations = vec![
+            obs("architecture", "claude:sonnet", 1, false, 5_000),
+            obs("architecture", "claude:sonnet", 2, true, 5_000),
+            obs("architecture", "claude:sonnet", 3, false, 5_000),
+            obs("architecture", "gemini", 4, false, 4_000),
+            obs("architecture", "gemini", 5, false, 4_000),
+            obs("architecture", "gemini", 6, false, 4_000),
+        ];
+        let got = learned_candidates_for_role("architecture", &observations, &[], 3);
+        assert_eq!(
+            got,
+            vec!["gemini".to_string(), "claude:sonnet".to_string()],
+            "higher-scoring agent must come first"
+        );
+    }
+
+    /// Other roles are excluded — only the requested role's agents appear.
+    #[test]
+    fn learned_candidates_filters_by_role() {
+        let observations = vec![
+            obs("architecture", "gemini", 1, false, 4_000),
+            obs("architecture", "gemini", 2, false, 4_000),
+            obs("architecture", "gemini", 3, false, 4_000),
+            obs("hardening", "claude:sonnet", 4, false, 4_000),
+            obs("hardening", "claude:sonnet", 5, false, 4_000),
+            obs("hardening", "claude:sonnet", 6, false, 4_000),
+        ];
+        let got = learned_candidates_for_role("architecture", &observations, &[], 3);
+        assert_eq!(got, vec!["gemini".to_string()]);
+    }
+
+    /// Deterministic tie-break: two agents with identical score and runs come
+    /// back in ascending agent-name order, regardless of input order.
+    #[test]
+    fn learned_candidates_tie_break_is_deterministic() {
+        // Both agents: 3/3 success, identical duration → identical score.
+        // Expect alphabetical: claude:sonnet before gemini.
+        let observations_reversed = vec![
+            obs("architecture", "gemini", 1, false, 4_000),
+            obs("architecture", "gemini", 2, false, 4_000),
+            obs("architecture", "gemini", 3, false, 4_000),
+            obs("architecture", "claude:sonnet", 4, false, 4_000),
+            obs("architecture", "claude:sonnet", 5, false, 4_000),
+            obs("architecture", "claude:sonnet", 6, false, 4_000),
+        ];
+        let got = learned_candidates_for_role("architecture", &observations_reversed, &[], 3);
+        assert_eq!(
+            got,
+            vec!["claude:sonnet".to_string(), "gemini".to_string()],
+            "ties must break by agent name ascending, deterministically"
+        );
+    }
+
+    /// `score_key` is total and quantized: distinct scores keep their order,
+    /// float noise below the 1e-6 quantum collapses to a tie, and NaN floors
+    /// instead of poisoning the comparison (the old `partial_cmp` path returned
+    /// `None` → `Ordering::Equal`).
+    #[test]
+    fn score_key_is_total_and_quantized() {
+        assert!(score_key(0.9) > score_key(0.1));
+        assert_eq!(score_key(0.5), score_key(0.5));
+        assert_eq!(
+            score_key(0.5),
+            score_key(0.5 + 1e-9),
+            "sub-quantum float noise must fold to a tie"
+        );
+        assert!(
+            score_key(f64::NAN) <= score_key(0.0),
+            "NaN must never outrank a real score"
+        );
+    }
+
+    /// On an exact score+runs tie, `best_agent_for_role` resolves to the
+    /// lexically-smaller agent name — matching `learned_candidates_for_role`.
+    /// The pre-quantization `max_by` had no tiebreak and kept the BTreeMap-last
+    /// (lexically-larger) agent, so this would have returned "gemini".
+    #[test]
+    fn best_agent_for_role_breaks_ties_by_smallest_name() {
+        let forward = vec![
+            obs("architecture", "claude:sonnet", 1, false, 4_000),
+            obs("architecture", "claude:sonnet", 2, false, 4_000),
+            obs("architecture", "claude:sonnet", 3, false, 4_000),
+            obs("architecture", "gemini", 4, false, 4_000),
+            obs("architecture", "gemini", 5, false, 4_000),
+            obs("architecture", "gemini", 6, false, 4_000),
+        ];
+        let mut reversed = forward.clone();
+        reversed.reverse();
+        let from_forward = best_agent_for_role("architecture", &forward, &[]);
+        let from_reversed = best_agent_for_role("architecture", &reversed, &[]);
+        assert_eq!(
+            from_forward, from_reversed,
+            "winner must not depend on input order"
+        );
+        assert_eq!(
+            from_forward, "claude:sonnet",
+            "exact tie must resolve to the lexically-smaller name"
+        );
     }
 }

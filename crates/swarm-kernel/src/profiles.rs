@@ -69,6 +69,13 @@ pub fn automation_hooks_json() -> serde_json::Value {
                 "purpose": "Map touched files to likely validation commands.",
                 "suggested_profiles": ["code-simplifier", "harness-hardener"],
                 "deterministic": true
+            },
+            {
+                "id": "reflection-pause",
+                "title": "Reflection Pause",
+                "purpose": "Force a System 2 inner loop scratchpad pause before answering.",
+                "suggested_profiles": ["code-simplifier", "systems-architect", "harness-hardener"],
+                "deterministic": true
             }
         ]
     })
@@ -117,8 +124,13 @@ pub fn profiles() -> Vec<AgentProfile> {
                     agent: "claude:sonnet",
                     purpose: "Name coupling, migration, and failure-mode risks before the main turn.",
                 },
+                ProfileHelper {
+                    role: "epistemic-red-team",
+                    agent: "gemini",
+                    purpose: "Write breaking tests or provide counter-examples to falsify the architect's claims.",
+                },
             ],
-            automation_hooks: &["context-map", "contract-diff", "dependency-scan"],
+            automation_hooks: &["context-map", "contract-diff", "dependency-scan", "reflection-pause"],
             deterministic_checks: &["schema documented", "migration path named", "rollback path named"],
         },
         AgentProfile {
@@ -175,8 +187,13 @@ pub fn profiles() -> Vec<AgentProfile> {
                     agent: "gemini",
                     purpose: "Search for concrete reproduction paths and stale-state hazards.",
                 },
+                ProfileHelper {
+                    role: "epistemic-red-team",
+                    agent: "gemini",
+                    purpose: "Provide adversarial exploits or edge cases to falsify the hardener's recovery plans.",
+                },
             ],
-            automation_hooks: &["error-classifier", "process-tree-check", "stale-session-scan"],
+            automation_hooks: &["error-classifier", "process-tree-check", "stale-session-scan", "reflection-pause"],
             deterministic_checks: &["failure class named", "human-visible recovery named", "timeout bounded"],
         },
         AgentProfile {
@@ -220,7 +237,7 @@ pub fn profiles() -> Vec<AgentProfile> {
                     purpose: "List high-coupling functions and the smallest testable extraction.",
                 },
             ],
-            automation_hooks: &["symbol-map", "test-target-suggest", "public-contract-freeze"],
+            automation_hooks: &["symbol-map", "test-target-suggest", "public-contract-freeze", "reflection-pause"],
             deterministic_checks: &["tests named", "public behavior unchanged", "diff scope bounded"],
         },
         AgentProfile {

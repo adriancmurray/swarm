@@ -15,13 +15,14 @@ use std::path::{Path, PathBuf};
 pub const COMPACT_HANDOFF_CONTRACT: &str = "\
 Compact handoff packet rules:
 Do not narrate file reads, directory traversal, or tool plans.
-Stay under 12 bullets total; each bullet under 24 words.
+Before answering, you must output a <scratchpad> block where you actively attempt to find flaws or falsify your own proposed solution (System 2 inner loop).
+After the <scratchpad>, stay under 12 bullets total; each bullet under 24 words.
 Required sections, in order: Findings, Risks, Steps, Blockers, Tests.
 Findings: 1-4 bullets with citations when source was inspected.
 Risks: 0-3 bullets.
 Steps: 1-3 bullets naming exact files/functions when known.
 Blockers: 0-3 bullets; write NEEDS_EVIDENCE with the missing anchor instead of guessing.
-Tests: 1-3 bullets naming deterministic checks.
+Tests: 1-3 bullets naming deterministic checks. MUST explicitly cite the exit_code of executed automation hooks (e.g. exit_code: 0) to serve as an Executable Proof of Work.
 Stop after the Tests section. Do not append analysis, verdicts, preambles, or final answers outside the required sections.";
 
 /// Build the prompt for a read-only codebase audit session.

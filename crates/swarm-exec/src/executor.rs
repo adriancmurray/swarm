@@ -34,7 +34,11 @@ const MAX_CAPTURE_CHUNK_BYTES: usize = 96 * 1024;
 ///
 /// Delegates to `telemetry_repo::default_file_telemetry_repo()` — the single
 /// canonical path resolver. Do NOT inline the path here.
-fn default_telemetry_repo() -> Option<FileTelemetryRepo> {
+///
+/// The Phase-2 learned-routing read-back (see `orchestration::LearnedRouting`)
+/// calls this to take the same one-shot telemetry snapshot that the write side
+/// uses, so reads and writes agree on the store location.
+pub(crate) fn default_telemetry_repo() -> Option<FileTelemetryRepo> {
     telemetry_repo::default_file_telemetry_repo()
 }
 

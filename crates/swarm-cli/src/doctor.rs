@@ -21,6 +21,7 @@ use swarm_kernel::args::{config_path, parse_agent_choice, Args};
 use swarm_kernel::backend_descriptor::BackendKind;
 use swarm_kernel::config::SwarmConfig;
 use swarm_manager::{load_skills, ProviderConfig, ProviderRegistry};
+use swarm_store::repos::telemetry_repo::{default_file_telemetry_repo, TelemetryRepo};
 use swarm_store::store::{providers_dir, skills_dir};
 
 use crate::provider_commands::key_status_label;
@@ -212,6 +213,38 @@ pub(crate) fn run_doctor(
                 ))?;
             }
         }
+    }
+
+    // ── Learned routing: Phase-2 telemetry read-back status ─────────────────
+    // Non-blocking informational note. When learned_routing is on (default),
+    // dispatch reads prior observations to fill the fallback gap for roles
+    // with no explicit route. Surface whether the store is readable and how
+    // much evidence it holds, so a cold/no-data store is not a silent surprise.
+    if config.reliability.learned_routing {
+        w("\n== learned routing ==".to_string())?;
+        match default_file_telemetry_repo() {
+            Some(repo) => match repo.observations() {
+                Ok(observations) => {
+                    w(format!(
+                        "✓ enabled (min_observations={}): {} observation(s) on file",
+                        config.reliability.learned_min_observations,
+                        observations.len()
+                    ))?;
+                }
+                Err(err) => {
+                    warnings += 1;
+                    w(format!(
+                        "! learned_routing is on but the telemetry store is unreadable ({err}); dispatch falls back to the static chain"
+                    ))?;
+                }
+            },
+            None => {
+                w("note: learned_routing is on but no telemetry store is resolvable (SWARM_HOME/HOME unset); dispatch falls back to the static chain".to_string())?;
+            }
+        }
+    } else {
+        w("\n== learned routing ==".to_string())?;
+        w("note: learned_routing is disabled via config; dispatch uses the static fallback chain".to_string())?;
     }
 
     // ── Providers: credential status ─────────────────────────────────────

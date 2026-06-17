@@ -22,11 +22,11 @@ use swarm_exec::executor::current_swarm_depth;
 use swarm_exec::monitor_runtime::{
     cmd_monitor, cmd_monitor_once, cmd_monitor_start, cmd_monitor_status, cmd_watch,
 };
-use swarm_exec::orchestration::{cmd_preset, run_discussion, run_partner_foreground, run_swarm};
+use swarm_exec::orchestration::{cmd_preset, run_discussion, run_partner_foreground, run_swarm, run_converge};
 use swarm_exec::synthesis::build_direct_persona_prompt;
 use swarm_kernel::agent::agent_name;
 use swarm_kernel::args::{
-    parse_args, parse_audit_args, parse_design_args, parse_discuss_args, parse_swarm_args,
+    parse_args, parse_audit_args, parse_design_args, parse_discuss_args, parse_swarm_args, parse_converge_args,
     print_help, Args, DEFAULT_TIMEOUT_SECS,
 };
 use swarm_kernel::format::prompt_preview;
@@ -101,6 +101,10 @@ impl SwarmService {
                 CliCommand::Discuss => {
                     let args = parse_discuss_args(raw.into_iter().skip(1))?;
                     return run_discussion(args);
+                }
+                CliCommand::Converge => {
+                    let args = parse_converge_args(raw.into_iter().skip(1))?;
+                    return run_converge(args);
                 }
                 CliCommand::Metadirector => {
                     let mut rewritten = vec![

@@ -97,6 +97,12 @@ fn gather_context_files(
             .filter(|term| path_lc.contains(term.as_str()))
             .count() as i64
             * 4;
+            
+        // Architectural Ledger: Prioritize ADRs and architecture docs
+        if path_lc.contains("docs/adr-") || path_lc.contains("docs/architecture") || path_lc.contains("architecture.md") {
+            score += 50;
+        }
+
         let text = fs::read_to_string(&path).unwrap_or_default();
         let excerpt_source = text.chars().take(16_000).collect::<String>();
         let excerpt_lc = excerpt_source.to_ascii_lowercase();

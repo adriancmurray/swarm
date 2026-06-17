@@ -69,6 +69,9 @@ pub fn assess_worker_output(
     if missing_packet_sections(&lower) {
         flags.push("MISSING_PACKET_SECTIONS".to_string());
     }
+    if missing_proof_of_work(&lower) {
+        flags.push("MISSING_PROOF_OF_WORK".to_string());
+    }
     let has_blockers =
         has_blocker_signal(trimmed) || evidence_gap_count > 0 || timed_out || exit_code != 0;
     if has_blockers {
@@ -114,6 +117,12 @@ fn missing_packet_sections(lower: &str) -> bool {
     ["findings", "risks", "steps", "blockers", "tests"]
         .iter()
         .any(|section| !lower.contains(section))
+}
+
+fn missing_proof_of_work(lower: &str) -> bool {
+    // If the tests section is completely missing, the packet section check catches it.
+    // Here we ensure they cited an exit code.
+    !lower.contains("exit_code: 0") && !lower.contains("exit code: 0") && !lower.contains("exit code 0")
 }
 
 fn has_blocker_signal(text: &str) -> bool {
@@ -686,7 +695,7 @@ mod tests {
         assert!(prompt.contains("Original task:\naudit"));
         assert!(prompt.contains("--- worker: qa (codex) exit=1 timed_out=false gate=UNVERIFIED"));
         assert!(prompt
-            .contains("flags=NONZERO_EXIT,NO_CITATIONS,MISSING_PACKET_SECTIONS,BLOCKER_SIGNAL"));
+            .contains("flags=NONZERO_EXIT,NO_CITATIONS,MISSING_PACKET_SECTIONS,MISSING_PROOF_OF_WORK,BLOCKER_SIGNAL"));
         assert!(prompt.contains("found bug"));
         assert!(prompt.contains("stderr:\nwarning"));
     }
@@ -703,7 +712,7 @@ Steps
 Blockers
 - None.
 Tests
-- `cargo test -p swarm-exec`.
+- `cargo test -p swarm-exec`, exit_code: 0.
 ";
 
         let gate = assess_worker_output(0, false, stdout, "");
@@ -727,7 +736,7 @@ Steps
 Blockers
 - None.
 Tests
-- `cargo test -p swarm-exec`.
+- `cargo test -p swarm-exec`, exit_code: 0.
 ";
 
         let gate = assess_worker_output(0, false, stdout, "");
@@ -805,7 +814,7 @@ Steps
 Blockers
 - None.
 Tests
-- cargo test.
+- cargo test, exit_code: 0.
 "
             .to_string(),
             stderr: String::new(),
@@ -858,7 +867,7 @@ Tests
         let with_none = build_worker_prompt(task, role, None);
 
         assert!(with_none.contains("You are the `qa` worker"));
-        assert!(with_none.contains("Stay under 12 bullets total"));
+        assert!(with_none.contains("stay under 12 bullets total"));
         assert!(with_none.contains("Required sections, in order:"));
         assert!(with_none.contains("Blockers: 0-3 bullets"));
         assert!(with_none.contains("NEEDS_EVIDENCE"));

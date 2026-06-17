@@ -43,6 +43,22 @@ pub struct SwarmConfig {
     /// are deterministic.
     #[serde(default)]
     pub backend: BTreeMap<String, BackendDescriptor>,
+    /// `[preset.<id>]` blocks — predefined orchestration pipelines.
+    #[serde(default)]
+    pub preset: BTreeMap<String, PresetConfig>,
+}
+
+/// A custom orchestration pipeline that can be invoked via `agent-swarm preset <id>`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PresetConfig {
+    pub orchestrator: String, // "discussion", "swarm", "converge", "audit", "design"
+    pub manager: Option<String>,
+    pub workers: Option<Vec<String>>,
+    pub participants: Option<Vec<String>>,
+    pub rounds: Option<u32>,
+    pub iterations: Option<u32>,
+    pub focus: Option<String>,
+    pub docs: Option<bool>,
 }
 
 /// `[swarm]`: defaults for fanout/swarm runs when CLI flags are omitted.
@@ -121,7 +137,10 @@ pub struct RouteConfig {
 
 /// `[reliability]`: retry + cross-backend fallback policy. `fallback_chain` is
 /// the global backend order used when a worker's role has no `[routes.<role>]`
-/// entry.
+/// entry. `learned_routing` enables the Phase-2 read-back from telemetry: when
+/// on (default) and a role has neither a route nor a global chain, learned
+/// candidates ranked by observed success fill the gap. `learned_min_observations`
+/// is the evidence floor below which an agent is ignored as too thinly sampled.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReliabilityConfig {
     #[serde(default = "default_retry_attempts")]
@@ -130,6 +149,10 @@ pub struct ReliabilityConfig {
     pub retry_backoff_ms: u64,
     #[serde(default)]
     pub fallback_chain: Vec<String>,
+    #[serde(default = "default_learned_routing")]
+    pub learned_routing: bool,
+    #[serde(default = "default_learned_min_observations")]
+    pub learned_min_observations: u32,
 }
 
 impl Default for ReliabilityConfig {
@@ -138,6 +161,8 @@ impl Default for ReliabilityConfig {
             retry_attempts: default_retry_attempts(),
             retry_backoff_ms: default_retry_backoff_ms(),
             fallback_chain: Vec::new(),
+            learned_routing: default_learned_routing(),
+            learned_min_observations: default_learned_min_observations(),
         }
     }
 }
@@ -148,6 +173,14 @@ fn default_retry_attempts() -> u32 {
 
 fn default_retry_backoff_ms() -> u64 {
     1_500
+}
+
+fn default_learned_routing() -> bool {
+    true
+}
+
+fn default_learned_min_observations() -> u32 {
+    3
 }
 
 /// Returns the current `[settings]` section from a config file at `path`.

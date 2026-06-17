@@ -16,10 +16,11 @@ use crate::agent::AgentSpec;
 use crate::args::parse_agent_spec_struct;
 use crate::config::SwarmConfig;
 
-/// Built-in fallback order when a role has neither a `[routes.<role>]` entry nor
-/// a global `[reliability].fallback_chain`. Claude-led by default, with Codex as
-/// the cross-backend fallback. Keep this backend-generic; config overrides it
-/// entirely, and any other backend can be put first via `fallback_chain`.
+/// Built-in fallback order when a role has neither a `[routes.<role>]` entry,
+/// a global `[reliability].fallback_chain`, nor learned candidates from
+/// telemetry. Claude-led by default, with Codex as the cross-backend fallback.
+/// Keep this backend-generic; config and learned-routing both override it,
+/// and any other backend can be put first via `fallback_chain`.
 const DEFAULT_FALLBACK_CHAIN: [&str; 2] = ["claude:sonnet", "codex"];
 
 /// What to do after an attempt finishes. Pure output of [`next_action`].
@@ -38,10 +39,21 @@ pub enum NextAction {
 /// the global `[reliability].fallback_chain` when the role has no route.
 /// De-duplicated by backend (not model) — falling from `claude:sonnet` to
 /// `claude:opus` is not a real fallback and would re-hit the same outage.
+///
+/// `learned` is the Phase-2 learned-routing read-back: when the caller supplies
+/// `Some(candidates)` and the role has neither an explicit route nor a global
+/// fallback chain, the learned candidates fill that gap (in order) *before*
+/// falling through to [`DEFAULT_FALLBACK_CHAIN`]. Explicit config always wins —
+/// `learned` is consulted only in the otherwise-silent `else` branch. The
+/// caller is responsible for deciding whether learning applies (config knob,
+/// per-run override, threshold) and for reading the telemetry store; this pure
+/// function never touches storage. Pass `None` everywhere to get byte-identical
+/// Phase-1 behavior.
 pub fn build_fallback_chain(
     role: &str,
     primary: &AgentSpec,
     config: &SwarmConfig,
+    learned: Option<&[String]>,
 ) -> Vec<AgentSpec> {
     let mut chain = vec![primary.clone()];
 
@@ -56,7 +68,17 @@ pub fn build_fallback_chain(
     } else if !global.is_empty() {
         global.iter().map(String::as_str).collect()
     } else {
-        DEFAULT_FALLBACK_CHAIN.to_vec()
+        // Config is silent for this role. Prefer learned candidates (in the
+        // caller-supplied order) when present; otherwise the static default.
+        // This is the ONLY branch where learning can influence dispatch.
+        let mut combined: Vec<&str> = Vec::new();
+        if let Some(learned) = learned {
+            combined.extend(learned.iter().map(String::as_str));
+        }
+        if combined.is_empty() {
+            combined.extend(DEFAULT_FALLBACK_CHAIN.iter().copied());
+        }
+        combined
     };
 
     for raw in candidates {
@@ -126,7 +148,7 @@ pub fn backoff_with_jitter(base_ms: u64, role: &str, attempt: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AgentChoice;
+    use crate::agent::{describe_spec, AgentChoice};
 
     fn spec(raw: &str) -> AgentSpec {
         parse_agent_spec_struct(raw).unwrap()
@@ -149,7 +171,7 @@ mod tests {
     #[test]
     fn chain_puts_primary_first_then_route_preferred() {
         let cfg = config_with_route("review", &["claude:sonnet", "codex"], &["claude"]);
-        let chain = build_fallback_chain("review", &spec("auto"), &cfg);
+        let chain = build_fallback_chain("review", &spec("auto"), &cfg, None);
         let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
         assert_eq!(
             backends,
@@ -161,7 +183,7 @@ mod tests {
     fn chain_dedups_primary_backend_ignoring_model() {
         // primary codex:gpt-5.5 + a "codex" in the preferred list -> no duplicate.
         let cfg = config_with_route("impl", &["codex", "claude:sonnet"], &[]);
-        let chain = build_fallback_chain("impl", &spec("codex:gpt-5.5"), &cfg);
+        let chain = build_fallback_chain("impl", &spec("codex:gpt-5.5"), &cfg, None);
         let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
         assert_eq!(backends, vec![AgentChoice::Codex, AgentChoice::Claude]);
     }
@@ -169,7 +191,7 @@ mod tests {
     #[test]
     fn chain_falls_back_to_global_when_role_has_no_route() {
         let cfg = config_with_route("unmatched", &[], &["claude:sonnet", "codex"]);
-        let chain = build_fallback_chain("some-other-role", &spec("auto"), &cfg);
+        let chain = build_fallback_chain("some-other-role", &spec("auto"), &cfg, None);
         let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
         assert_eq!(
             backends,
@@ -179,14 +201,78 @@ mod tests {
 
     #[test]
     fn chain_uses_built_in_default_with_no_config() {
-        // No routes, no global fallback_chain -> the claude-led built-in default,
-        // with the auto primary preserved at the front.
+        // No routes, no global fallback_chain, no learned candidates -> the
+        // claude-led built-in default, with the auto primary preserved at front.
         let cfg = SwarmConfig::default();
-        let chain = build_fallback_chain("any", &spec("auto"), &cfg);
+        let chain = build_fallback_chain("any", &spec("auto"), &cfg, None);
         let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
         assert_eq!(
             backends,
             vec![AgentChoice::Auto, AgentChoice::Claude, AgentChoice::Codex]
+        );
+    }
+
+    /// Learned candidates fill the gap when config is silent. This is the
+    /// Phase-2 read-back: no route, no global chain, but telemetry says
+    /// `gemini` and `claude:sonnet` ranked well for this role. Asserted on
+    /// spec strings because learned candidates may be config-defined custom
+    /// backends (like `gemini`) that have no `AgentChoice` variant.
+    #[test]
+    fn chain_uses_learned_candidates_when_config_is_silent() {
+        let cfg = SwarmConfig::default();
+        let learned = vec!["gemini".to_string(), "claude:sonnet".to_string()];
+        let chain = build_fallback_chain("review", &spec("codex"), &cfg, Some(&learned));
+        let rendered: Vec<String> = chain.iter().map(describe_spec).collect();
+        assert_eq!(
+            rendered,
+            vec!["codex".to_string(), "gemini".to_string(), "claude:sonnet".to_string()],
+            "learned candidates fill the gap in supplied order after the primary"
+        );
+    }
+
+    /// An empty learned slice falls through to DEFAULT_FALLBACK_CHAIN — callers
+    /// that computed no candidates (cold telemetry) get unchanged Phase-1
+    /// behavior, not an empty chain.
+    #[test]
+    fn chain_empty_learned_falls_back_to_default() {
+        let cfg = SwarmConfig::default();
+        let learned: Vec<String> = Vec::new();
+        let chain = build_fallback_chain("any", &spec("auto"), &cfg, Some(&learned));
+        let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
+        assert_eq!(
+            backends,
+            vec![AgentChoice::Auto, AgentChoice::Claude, AgentChoice::Codex]
+        );
+    }
+
+    /// Learned candidates are ignored when an explicit route exists — explicit
+    /// config always wins, learning only fills the silent gap.
+    #[test]
+    fn chain_ignores_learned_when_route_is_explicit() {
+        let cfg = config_with_route("review", &["codex"], &[]);
+        let learned = vec!["gemini".to_string(), "claude:sonnet".to_string()];
+        let chain = build_fallback_chain("review", &spec("auto"), &cfg, Some(&learned));
+        let backends: Vec<AgentChoice> = chain.iter().map(|s| s.agent).collect();
+        assert_eq!(
+            backends,
+            vec![AgentChoice::Auto, AgentChoice::Codex],
+            "explicit route must override learned candidates entirely"
+        );
+    }
+
+    /// Learned candidates dedup against the primary's backend — same as
+    /// configured candidates. A learned "codex" with a codex primary adds
+    /// nothing. `gemini` survives as a distinct backend (a custom spec).
+    #[test]
+    fn chain_dedups_learned_against_primary_backend() {
+        let cfg = SwarmConfig::default();
+        let learned = vec!["codex".to_string(), "gemini".to_string()];
+        let chain = build_fallback_chain("review", &spec("codex:gpt-5.5"), &cfg, Some(&learned));
+        let rendered: Vec<String> = chain.iter().map(describe_spec).collect();
+        assert_eq!(
+            rendered,
+            vec!["codex:gpt-5.5".to_string(), "gemini".to_string()],
+            "learned candidate sharing the primary's backend must be deduped"
         );
     }
 

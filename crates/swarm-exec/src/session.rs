@@ -44,6 +44,33 @@ pub struct DiscussionSession {
 }
 
 impl DiscussionSession {
+    pub fn create_converge(_args: &swarm_kernel::args::ConvergeArgs) -> Result<Self, String> {
+        let base = session_store_dir()?;
+        fs::create_dir_all(&base)
+            .map_err(|err| format!("Error creating session directory {}: {err}", base.display()))?;
+        let id = new_session_id();
+        let dir = base.join(id.as_str());
+        fs::create_dir_all(&dir)
+            .map_err(|err| format!("Error creating session {}: {err}", dir.display()))?;
+        let session = Self {
+            id,
+            events_path: dir.join("events.jsonl"),
+            transcript_path: dir.join("transcript.md"),
+            summary_path: dir.join("summary.md"),
+            digest_path: dir.join("digest.md"),
+            docs_path: dir.join("api-docs.md"),
+            layer_reports_path: dir.join("layer-reports.jsonl"),
+            dir,
+        };
+        session.append_event(
+            EventKind::Created,
+            serde_json::json!({
+                "mode": "converge"
+            }),
+        )?;
+        Ok(session)
+    }
+
     pub fn create_swarm(args: &SwarmArgs) -> Result<Self, String> {
         let base = session_store_dir()?;
         fs::create_dir_all(&base)

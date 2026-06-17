@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use swarm_kernel::agent::{describe_spec, AgentSpec};
 use swarm_kernel::args::{
     load_default_timeout, parse_agent_spec_struct, parse_audit_args, parse_design_args,
-    parse_discuss_args, parse_swarm_args, print_help, Args, DiscussArgs, SwarmArgs, WorkerSpec,
+    parse_discuss_args, parse_swarm_args, parse_converge_args, print_help, Args, ConvergeArgs, DiscussArgs, SwarmArgs, WorkerSpec,
 };
 use swarm_kernel::config::{load_config, resolve_docs, SwarmConfig};
 use swarm_kernel::context::context_gather_json;
@@ -28,15 +28,17 @@ use swarm_kernel::ids::PresetId;
 use swarm_kernel::job_types::{JobAgent, JobMode, JobStatus};
 use swarm_kernel::profiles;
 use swarm_kernel::routing::build_fallback_chain;
+use swarm_kernel::telemetry::learned_candidates_for_role;
 use swarm_store::job::JobRecord;
 use swarm_store::repos::job_repo::{FileJobRepo, JobRepo, JobSpec};
+use swarm_store::repos::telemetry_repo::TelemetryRepo;
 use swarm_store::store::{job_store_dir, now_ms, write_text_atomic};
 
 use crate::backend_registry::BackendRegistry;
 use crate::executor::{
-    execute_partner, execute_with_fallback, execute_with_fallback_chunks, output_record_status,
-    output_status_code, print_partner_output, record_agent_error, record_agent_observation,
-    FallbackOutcome,
+    default_telemetry_repo, execute_partner, execute_with_fallback,
+    execute_with_fallback_chunks, output_record_status, output_status_code,
+    print_partner_output, record_agent_error, record_agent_observation, FallbackOutcome,
 };
 use crate::preflight::{
     classified_agent_error_payload, classified_error_payload, run_session_preflight,
@@ -120,6 +122,110 @@ pub fn run_partner_foreground(
 /// when the chain advanced past the requested backend, or `backend_retry` when
 /// the requested backend succeeded only after a retry. A clean first-try success
 /// emits nothing. Degradation is never silent.
+/// Phase-2 learned-routing context: a one-shot snapshot of telemetry read at
+/// the start of a run, memoizing per-role candidate lists so the 9
+/// `build_fallback_chain` call sites in this module share a single read rather
+/// than each hitting the store. Honors the config knob
+/// (`reliability.learned_routing`) and the per-run `--no-learned` override
+/// (passed here as `enabled`): when disabled, every lookup returns `None` and
+/// dispatch is byte-identical to Phase-1.
+///
+/// The "is this role silent?" check mirrors the three-way branch in
+/// `build_fallback_chain`: learning only fills the gap when a role has neither
+/// an explicit `[routes.<role>]` entry nor a non-empty global
+/// `[reliability].fallback_chain`. Explicit config always wins.
+#[derive(Clone)]
+pub(crate) struct LearnedRouting {
+    enabled: bool,
+    min_observations: u32,
+    config: SwarmConfig,
+    /// Per-role candidate cache. Empty when learning is disabled or telemetry
+    /// was unreadable, in which case `candidates_for` always returns `None`.
+    cache: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl LearnedRouting {
+    /// Snapshot telemetry for this run. Reads observations + feedback exactly
+    /// once; failures (missing/unreadable store, no HOME) degrade to "no
+    /// learned candidates" — Phase-1 behavior — rather than failing the run.
+    pub(crate) fn snapshot(config: &SwarmConfig, enabled: bool) -> Self {
+        let mut cache = std::collections::HashMap::new();
+        if enabled {
+            if let Some(repo) = default_telemetry_repo() {
+                if let (Ok(observations), Ok(feedback)) =
+                    (repo.observations(), repo.feedback())
+                {
+                    // Pre-compute for every role we have any data on; unknown
+                    // roles miss the cache and `candidates_for` returns None.
+                    let mut roles: std::collections::HashSet<&str> =
+                        observations.iter().map(|o| o.role.as_str()).collect();
+                    roles.extend(feedback.iter().map(|f| f.role.as_str()));
+                    for role in roles {
+                        let ranked = learned_candidates_for_role(
+                            role,
+                            &observations,
+                            &feedback,
+                            config.reliability.learned_min_observations,
+                        );
+                        if !ranked.is_empty() {
+                            cache.insert(role.to_string(), ranked);
+                        }
+                    }
+                }
+            }
+        }
+        Self {
+            enabled,
+            min_observations: config.reliability.learned_min_observations,
+            config: config.clone(),
+            cache,
+        }
+    }
+
+    /// Returns learned candidates for `role` as a slice to hand to
+    /// `build_fallback_chain`, but ONLY when the role is config-silent (no
+    /// route, no global fallback chain) and learning is enabled with data. In
+    /// every other case returns `None`, leaving dispatch unchanged.
+    ///
+    /// `min_observations` is surfaced for the `LearnedRoutingApplied` event
+    /// payload via [`Self::applied`] rather than threaded through this lookup.
+    pub(crate) fn candidates_for(&self, role: &str) -> Option<&[String]> {
+        if !self.enabled {
+            return None;
+        }
+        // Mirror build_fallback_chain's "is silent?" check: an explicit route
+        // or a non-empty global chain means config speaks, so learning stands
+        // aside.
+        let route_silent = self
+            .config
+            .routes
+            .get(role)
+            .map_or(true, |route| route.preferred.is_empty());
+        let global_silent = self.config.reliability.fallback_chain.is_empty();
+        if !route_silent || !global_silent {
+            return None;
+        }
+        self.cache.get(role).map(Vec::as_slice)
+    }
+
+    /// Emit a `learned_routing_applied` event when learning filled the gap for
+    /// `role`, recording the ranked agents and the evidence threshold so the
+    /// decision is auditable in `events.jsonl` / `transcript.md`.
+    pub(crate) fn emit_event(&self, session: &DiscussionSession, role: &str) {
+        if let Some(candidates) = self.candidates_for(role) {
+            let _ = session.append_event(
+                EventKind::Other("learned_routing_applied".to_string()),
+                serde_json::json!({
+                    "role": role,
+                    "agents": candidates,
+                    "min_observations": self.min_observations,
+                    "source": "telemetry",
+                }),
+            );
+        }
+    }
+}
+
 fn emit_reliability_events(
     session: &DiscussionSession,
     role: &str,
@@ -175,6 +281,10 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
     }
 
     let config = load_config();
+    let learned = LearnedRouting::snapshot(
+        &config,
+        args.learned.unwrap_or(config.reliability.learned_routing),
+    );
     let session = DiscussionSession::create_swarm(&args)?;
     session.write_swarm_metadata(&args)?;
     session.append_event(
@@ -255,7 +365,9 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
         let timeout_secs = worker.timeout_secs.unwrap_or(args.timeout_secs);
         let session = session.clone();
         let config = config.clone();
+        let learned = learned.clone();
         handles.push(thread::spawn(move || {
+            learned.emit_event(&session, &worker.role);
             let _ = session.append_event(
                 EventKind::WorkerStarted,
                 serde_json::json!({
@@ -275,7 +387,12 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
                 background: false,
                 allow_bypass_permissions: false,
             };
-            let chain = build_fallback_chain(&worker.role, &worker.spec, &config);
+            let chain = build_fallback_chain(
+                &worker.role,
+                &worker.spec,
+                &config,
+                learned.candidates_for(&worker.role),
+            );
             let started = Instant::now();
             let fallback = execute_with_fallback(
                 &BackendRegistry::from_config(&config),
@@ -400,7 +517,13 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
             "agent": describe_spec(&args.manager)
         }),
     )?;
-    let manager_chain = build_fallback_chain("manager", &args.manager, &config);
+    learned.emit_event(&session, "manager");
+    let manager_chain = build_fallback_chain(
+        "manager",
+        &args.manager,
+        &config,
+        learned.candidates_for("manager"),
+    );
     let manager_started = Instant::now();
     let manager_fallback = execute_with_fallback(
         &BackendRegistry::from_config(&config),
@@ -522,6 +645,10 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
 
     // Load config early so docs_enabled can be emitted in the SessionStarted event.
     let config = load_config();
+    let learned = LearnedRouting::snapshot(
+        &config,
+        args.learned.unwrap_or(config.reliability.learned_routing),
+    );
     // Resolve docs: CLI flag > config.settings.docs_default > false.
     let docs_enabled = resolve_docs(args.docs, config.settings.docs_default);
 
@@ -609,6 +736,7 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
             let discussion_context = discussion_context.clone();
             let profile_helpers = args.profile_helpers;
             let config = config.clone();
+            let learned = learned.clone();
             handles.push(thread::spawn(move || {
                 let profile = profiles::profile_for_role(&participant.role);
                 let _ = session.append_event(
@@ -724,7 +852,12 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
                         "turn",
                     );
                 };
-                let chain = build_fallback_chain(&participant.role, &participant.spec, &config);
+                let chain = build_fallback_chain(
+                    &participant.role,
+                    &participant.spec,
+                    &config,
+                    learned.candidates_for(&participant.role),
+                );
                 let fallback = execute_with_fallback_chunks(
                     &BackendRegistry::from_config(&config),
                     &chain,
@@ -737,7 +870,56 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
                 heartbeat_done.store(true, Ordering::Relaxed);
                 let _ = heartbeat.join();
                 emit_reliability_events(&session, &participant.role, &participant.spec, &fallback);
-                let output = fallback.result;
+                let mut output = fallback.result;
+
+                // --- Epistemic Red Team (Post-Turn Falsification) ---
+                if let Ok(ref turn_out) = output {
+                    if let Some(red_team) = profile.helpers.iter().find(|h| h.role == "epistemic-red-team") {
+                        let red_prompt = format!("Falsify this proposed solution. Write a breaking test or cite an edge case. If you find a critical flaw, exit with code 0 (success in falsifying). If the solution is flawless, exit with code 1.\n\n{}", turn_out.stdout);
+                        let red_spec = swarm_kernel::args::parse_agent_spec_struct(red_team.agent).unwrap_or_else(|_| participant.spec.clone());
+                        let red_args = Args {
+                            prompt: red_prompt.clone(),
+                            cwd: call_args.cwd.clone(),
+                            timeout_secs: 120,
+                            quiet: true,
+                            agent: red_spec.agent,
+                            agent_custom: red_spec.custom.clone(),
+                            model: None,
+                            persona: None,
+                            background: false,
+                            allow_bypass_permissions: false,
+                        };
+                        let red_chain = build_fallback_chain(
+                            "epistemic-red-team",
+                            &red_spec,
+                            &config,
+                            learned.candidates_for("epistemic-red-team"),
+                        );
+                        
+                        let _ = session.append_event(swarm_kernel::events::EventKind::HelperStarted, serde_json::json!({
+                            "round": round,
+                            "role": "epistemic-red-team",
+                            "parent_role": &participant.role,
+                            "purpose": red_team.purpose
+                        }));
+                        
+                        let red_fallback = execute_with_fallback(
+                            &crate::backend_registry::BackendRegistry::from_config(&config),
+                            &red_chain,
+                            &red_args,
+                            &red_prompt,
+                            "epistemic-red-team",
+                            &config.reliability
+                        );
+                        
+                        if let Ok(red_out) = red_fallback.result {
+                            if crate::executor::output_status_code(&red_out) == 0 {
+                                output = Err(format!("Epistemic Red Team successfully falsified the solution:\n{}", red_out.stdout));
+                            }
+                        }
+                    }
+                }
+                // --- End Red Team ---
                 match &output {
                     Ok(output) => {
                         record_agent_observation(
@@ -917,7 +1099,12 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
         background: false,
         allow_bypass_permissions: false,
     };
-    let manager_chain = build_fallback_chain("manager", &args.manager, &config);
+    let manager_chain = build_fallback_chain(
+        "manager",
+        &args.manager,
+        &config,
+        learned.candidates_for("manager"),
+    );
     let manager_started = Instant::now();
     let manager_fallback = execute_with_fallback(
         &BackendRegistry::from_config(&config),
@@ -1020,7 +1207,12 @@ pub fn run_discussion(args: DiscussArgs) -> Result<i32, String> {
             background: false,
             allow_bypass_permissions: false,
         };
-        let docs_chain = build_fallback_chain("api-docs", &args.docs_agent, &config);
+        let docs_chain = build_fallback_chain(
+            "api-docs",
+            &args.docs_agent,
+            &config,
+            learned.candidates_for("api-docs"),
+        );
         let docs_started = Instant::now();
         let docs_fallback = execute_with_fallback(
             &BackendRegistry::from_config(&config),
@@ -1162,6 +1354,56 @@ pub fn cmd_preset(raw: &[String]) -> Result<i32, String> {
     }
     if !helper_flag_seen {
         passthrough.push("--helpers".to_string());
+    }
+
+    let config = swarm_kernel::config::load_config();
+    if let Some(preset) = config.preset.get(preset_id.as_str()) {
+        let mut args = Vec::new();
+        if let Some(manager) = &preset.manager {
+            args.push("--manager".to_string());
+            args.push(manager.clone());
+        }
+        if let Some(workers) = &preset.workers {
+            for w in workers {
+                args.push("--worker".to_string());
+                args.push(w.clone());
+            }
+        }
+        if let Some(participants) = &preset.participants {
+            for p in participants {
+                args.push("--participant".to_string());
+                args.push(p.clone());
+            }
+        }
+        if let Some(rounds) = preset.rounds {
+            args.push("--rounds".to_string());
+            args.push(rounds.to_string());
+        }
+        if let Some(iterations) = preset.iterations {
+            args.push("--iterations".to_string());
+            args.push(iterations.to_string());
+        }
+        if let Some(focus) = &preset.focus {
+            args.push("--focus".to_string());
+            args.push(focus.clone());
+        }
+        if let Some(docs) = preset.docs {
+            if docs {
+                args.push("--docs".to_string());
+            } else {
+                args.push("--no-docs".to_string());
+            }
+        }
+        args.extend(passthrough.clone());
+        args.push(prompt.clone());
+        match preset.orchestrator.as_str() {
+            "discussion" => return run_discussion(parse_discuss_args(args)?),
+            "swarm" | "fanout" => return run_swarm(parse_swarm_args(args)?),
+            "converge" => return run_converge(parse_converge_args(args)?),
+            "audit" => return run_discussion(parse_audit_args(args)?),
+            "design" => return run_discussion(parse_design_args(args)?),
+            other => return Err(format!("Error: unknown orchestrator `{other}` in config")),
+        }
     }
 
     match preset_id.as_str() {
@@ -1316,7 +1558,7 @@ fn run_profile_helpers(
             allow_bypass_permissions: false,
         };
         let started = Instant::now();
-        let helper_chain = build_fallback_chain(helper.role, &spec, config);
+        let helper_chain = build_fallback_chain(helper.role, &spec, config, None);
         let helper_fallback = execute_with_fallback(
             &BackendRegistry::from_config(config),
             &helper_chain,
@@ -1416,4 +1658,244 @@ fn run_profile_helpers(
         }
     }
     Ok(context)
+}
+
+pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
+    let session = DiscussionSession::create_converge(&args)?;
+    println!("Converge Session ID: {}", session.id);
+
+    let config = swarm_kernel::config::load_config();
+    let learned = LearnedRouting::snapshot(
+        &config,
+        args.learned.unwrap_or(config.reliability.learned_routing),
+    );
+
+    // Initial context gathering (similar to run_swarm/discuss)
+    let context_text = if config.context.auto_inject {
+        match swarm_kernel::context::context_gather_json(&args.cwd, &args.prompt, 512) {
+            Ok(ctx_json) => crate::synthesis::render_context_block(&ctx_json).unwrap_or_default(),
+            Err(err) => {
+                eprintln!("agent-swarm: warning: auto-context gather failed ({err}); proceeding without context");
+                String::new()
+            }
+        }
+    } else {
+        String::new()
+    };
+    let context_ref: Option<String> = if context_text.is_empty() { None } else { Some(context_text.clone()) };
+
+    let mut current_prompt = args.prompt.clone();
+
+    for iteration in 1..=args.iterations {
+        println!("\n=== Converge Iteration {}/{} ===", iteration, args.iterations);
+
+        let mut handles = Vec::new();
+        for worker in args.participants.clone() {
+            let c_config = config.clone();
+            let c_cwd = args.cwd.clone();
+            let c_timeout = args.timeout_secs;
+            let c_context = context_text.clone();
+            let c_current_prompt = current_prompt.clone();
+            let c_session = session.clone();
+            let c_learned = learned.clone();
+
+            handles.push(std::thread::spawn(move || {
+                let spec = worker.spec.clone();
+                let role = worker.role.clone();
+                let worker_chain = build_fallback_chain(
+                    &role,
+                    &spec,
+                    &c_config,
+                    c_learned.candidates_for(&role),
+                );
+                
+                // Build prompt
+                let mut prompt = String::new();
+                if iteration == 1 && !c_context.is_empty() {
+                    prompt.push_str("### Codebase Context\n");
+                    prompt.push_str(&c_context);
+                    prompt.push_str("\n\n");
+                } else if iteration > 1 {
+                    prompt.push_str("### Convergence Baseline\n");
+                    prompt.push_str(&c_current_prompt);
+                    prompt.push_str("\n\n### Your Task\n");
+                    prompt.push_str("Review the convergence baseline above and refine the proposed solution from your unique persona perspective. Identify any remaining edge cases and propose structural improvements.\n\n");
+                } else {
+                    prompt.push_str(&c_current_prompt);
+                    prompt.push_str("\n\n");
+                }
+
+                let profile_id = swarm_kernel::profiles::profile_id_for_role(&role);
+                if let Ok(profile_instructions) = crate::synthesis::build_direct_persona_prompt(&c_current_prompt, profile_id) {
+                    if !profile_instructions.is_empty() {
+                        prompt.push_str(&profile_instructions);
+                        prompt.push_str("\n\n");
+                    }
+                }
+                if iteration == 1 {
+                    prompt.push_str(&c_current_prompt);
+                }
+
+                let call_args = Args {
+                    prompt: prompt.clone(),
+                    cwd: c_cwd,
+                    timeout_secs: worker.timeout_secs.unwrap_or(c_timeout),
+                    quiet: true,
+                    agent: spec.agent.clone(),
+                    agent_custom: spec.custom.clone(),
+                    model: spec.model.clone(),
+                    persona: None,
+                    background: false,
+                    allow_bypass_permissions: false,
+                };
+
+                let started = Instant::now();
+                let fallback = execute_with_fallback(
+                    &BackendRegistry::from_config(&c_config),
+                    &worker_chain,
+                    &call_args,
+                    &prompt,
+                    &role,
+                    &c_config.reliability,
+                );
+                
+                let ran = fallback.used.clone();
+                match &fallback.result {
+                    Ok(out) => {
+                        record_agent_observation(
+                            "converge-worker",
+                            Some(c_session.id.as_str()),
+                            &role,
+                            &ran,
+                            &call_args.cwd,
+                            &prompt,
+                            out,
+                            started.elapsed(),
+                        );
+                        let _ = c_session.append_layer_report(
+                            "worker",
+                            &role,
+                            &describe_spec(&ran),
+                            None,
+                            "completed",
+                            out.stdout.trim(),
+                        );
+                    }
+                    Err(err) => {
+                        record_agent_error(
+                            "converge-worker",
+                            Some(c_session.id.as_str()),
+                            &role,
+                            &ran,
+                            &call_args.cwd,
+                            &prompt,
+                            err,
+                            started.elapsed(),
+                        );
+                        let _ = c_session.append_layer_report(
+                            "worker",
+                            &role,
+                            &describe_spec(&ran),
+                            None,
+                            "failed",
+                            err,
+                        );
+                    }
+                }
+                (worker, fallback)
+            }));
+        }
+
+        let mut worker_outputs = String::new();
+        for handle in handles {
+            match handle.join() {
+                Ok((worker, fallback)) => {
+                    emit_reliability_events(&session, &worker.role, &worker.spec, &fallback);
+                    match fallback.result {
+                        Ok(out) => {
+                            worker_outputs.push_str(&format!("\n### Proposed Plan from {}\n{}\n", worker.role, out.stdout.trim()));
+                        }
+                        Err(e) => {
+                            worker_outputs.push_str(&format!("\n### Failed Plan from {}\n{}\n", worker.role, e));
+                        }
+                    }
+                }
+                Err(_) => {
+                    eprintln!("converge worker panicked");
+                }
+            }
+        }
+
+        // Now Director (Manager) synthesizes
+        let manager_chain = build_fallback_chain(
+            "manager",
+            &args.manager,
+            &config,
+            learned.candidates_for("manager"),
+        );
+        let mut manager_prompt = String::new();
+        manager_prompt.push_str("### Convergence Director\n");
+        manager_prompt.push_str("You are the Director of a Convergence Planning Pipeline. The subagents have proposed the following plans. Your task is to identify structural overlaps, eliminate fragile extremes or hallucinations, and synthesize the strongest verified convergence baseline.\n\n");
+        if iteration == args.iterations {
+            manager_prompt.push_str("This is the FINAL iteration. Provide the completed, unified implementation plan and any unresolved risks.\n\n");
+        } else {
+            manager_prompt.push_str("Provide the refined convergence constraints for the next iteration of planning.\n\n");
+        }
+        manager_prompt.push_str(&worker_outputs);
+
+        let manager_args = Args {
+            prompt: manager_prompt.clone(),
+            cwd: args.cwd.clone(),
+            timeout_secs: args.timeout_secs,
+            quiet: true,
+            agent: args.manager.agent.clone(),
+            agent_custom: args.manager.custom.clone(),
+            model: args.manager.model.clone(),
+            persona: None,
+            background: false,
+            allow_bypass_permissions: false,
+        };
+
+        println!("\n[Director] Integrating proposals...");
+        let manager_started = Instant::now();
+        let manager_fallback = execute_with_fallback(
+            &BackendRegistry::from_config(&config),
+            &manager_chain,
+            &manager_args,
+            &manager_prompt,
+            "manager",
+            &config.reliability,
+        );
+
+        emit_reliability_events(&session, "manager", &args.manager, &manager_fallback);
+
+        match manager_fallback.result {
+            Ok(out) => {
+                session.append_layer_report(
+                    "manager",
+                    "manager",
+                    &describe_spec(&args.manager),
+                    None,
+                    "completed",
+                    out.stdout.trim(),
+                )?;
+                println!("\nConvergence Output:\n{}", out.stdout.trim());
+                current_prompt = out.stdout.trim().to_string(); // Loop feedback
+            }
+            Err(e) => {
+                session.append_layer_report(
+                    "manager",
+                    "manager",
+                    &describe_spec(&args.manager),
+                    None,
+                    "failed",
+                    &e,
+                )?;
+                println!("\nConvergence Error: {}", e);
+                return Err(format!("Manager synthesis failed: {}", e));
+            }
+        }
+    }
+
+    Ok(0)
 }

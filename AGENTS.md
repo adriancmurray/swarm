@@ -25,6 +25,24 @@ Run `swarm doctor` to verify config, backends, routing, and credentials in one
 pass. Run `swarm skills list` to see the `SKILL.md` skills a native backend can
 load into a worker.
 
+## Learned routing (Phase-2)
+
+Every worker and manager run records an outcome observation. By default
+(`[reliability].learned_routing = true`, gated by `learned_min_observations`,
+default 3), swarm reads those observations back at dispatch time and, **when a
+role has neither an explicit `[routes.<role>]` route nor a global
+`[reliability].fallback_chain`**, fills the fallback gap with agents ranked by
+observed success. Explicit config always wins — learning only fills the silent
+gap, it never overrides the caller's primary or a configured chain. Cold
+telemetry (no data) falls back to the static default, so a fresh install is
+byte-identical to the old behavior.
+
+Pass `--no-learned` to any fanout/discuss/audit/design/converge run to opt out
+for that run, or set `learned_routing = false` in config to disable globally.
+Each application emits a `learned_routing_applied` event in `events.jsonl`; the
+`swarm doctor` `learned routing` section reports whether the store is readable
+and how many observations it holds.
+
 ## Driving swarm from a host agent
 
 If you are a host agent (Codex, Claude Code, Gemini CLI, etc.) deciding how to

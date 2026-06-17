@@ -44,6 +44,12 @@ pub struct SwarmArgs {
     /// from `--context` / `--no-context` CLI flags override the config value.
     /// `None` means "use the config key" (which defaults to false).
     pub inject_context: Option<bool>,
+    /// Learned-routing override. `Some(false)` from `--no-learned` disables
+    /// the Phase-2 telemetry read-back for this run (dispatch falls back to
+    /// the static `DEFAULT_FALLBACK_CHAIN`). `Some(true)` from `--learned`
+    /// re-enables it when `[reliability].learned_routing = false`. `None`
+    /// (default) means "use the config key" (which defaults to true).
+    pub learned: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +70,21 @@ pub struct DiscussArgs {
     pub docs: Option<bool>,
     pub docs_agent: AgentSpec,
     pub profile_helpers: bool,
+    /// Learned-routing override; see [`SwarmArgs::learned`].
+    pub learned: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvergeArgs {
+    pub prompt: String,
+    pub cwd: PathBuf,
+    pub timeout_secs: u64,
+    pub manager: AgentSpec,
+    pub participants: Vec<WorkerSpec>,
+    pub iterations: u32,
+    pub profile_helpers: bool,
+    /// Learned-routing override; see [`SwarmArgs::learned`].
+    pub learned: Option<bool>,
 }
 
 pub fn parse_args<I>(raw: I) -> Result<Args, String>
@@ -283,6 +304,7 @@ where
     let mut parent = None;
     let mut slice = None;
     let mut inject_context: Option<bool> = None;
+    let mut learned: Option<bool> = None;
 
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
@@ -319,6 +341,8 @@ where
             }
             "--context" => inject_context = Some(true),
             "--no-context" => inject_context = Some(false),
+            "--learned" => learned = Some(true),
+            "--no-learned" => learned = Some(false),
             "--parent" => {
                 let value = iter
                     .next()
@@ -381,6 +405,7 @@ where
         parent,
         slice,
         inject_context,
+        learned,
     })
 }
 
@@ -411,6 +436,7 @@ where
         .and_then(|spec| parse_agent_spec_struct(spec).ok())
         .unwrap_or_else(default_manager);
     let mut profile_helpers = false;
+    let mut learned: Option<bool> = None;
 
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
@@ -453,6 +479,8 @@ where
             }
             "--docs" | "--api-docs" => docs = Some(true),
             "--no-docs" => docs = Some(false),
+            "--learned" => learned = Some(true),
+            "--no-learned" => learned = Some(false),
             "--helpers" | "--profile-helpers" => profile_helpers = true,
             "--no-helpers" => profile_helpers = false,
             "--docs-agent" => {
@@ -546,6 +574,128 @@ where
         docs,
         docs_agent,
         profile_helpers,
+        learned,
+    })
+}
+
+pub fn parse_converge_args<I>(raw: I) -> Result<ConvergeArgs, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let config = crate::config::load_config();
+    let mut prompt = None;
+    let mut cwd = env::current_dir().map_err(|err| format!("Error reading cwd: {err}"))?;
+    let mut timeout_secs = load_default_timeout();
+    let mut manager = config
+        .discussion
+        .default_manager
+        .as_deref()
+        .and_then(|spec| parse_agent_spec_struct(spec).ok())
+        .unwrap_or_else(default_manager);
+    let mut participants = Vec::new();
+    let mut iterations = 3; // Default converge iterations
+    let mut profile_helpers = false;
+    let mut learned: Option<bool> = None;
+
+    let mut iter = raw.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_help(timeout_secs);
+                std::process::exit(0);
+            }
+            "--manager" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Error: --manager requires a value".to_string())?;
+                manager = parse_agent_spec_struct(&value)?;
+            }
+            "--participant" | "--worker" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| format!("Error: {arg} requires a value"))?;
+                participants.push(parse_worker_spec(&value)?);
+            }
+            "--iterations" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Error: --iterations requires a value".to_string())?;
+                iterations = value
+                    .parse::<u32>()
+                    .map_err(|_| format!("Error: invalid --iterations value `{value}`"))?;
+            }
+            "--helpers" | "--profile-helpers" => profile_helpers = true,
+            "--no-helpers" => profile_helpers = false,
+            "--learned" => learned = Some(true),
+            "--no-learned" => learned = Some(false),
+            "--cwd" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Error: --cwd requires a value".to_string())?;
+                cwd = PathBuf::from(value);
+            }
+            "--timeout" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Error: --timeout requires a value".to_string())?;
+                timeout_secs = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("Error: invalid --timeout value `{value}`"))?;
+            }
+            _ if arg.starts_with("--manager=") => {
+                manager = parse_agent_spec_struct(arg.strip_prefix("--manager=").unwrap_or(""))?;
+            }
+            _ if arg.starts_with("--participant=") => {
+                participants.push(parse_worker_spec(
+                    arg.strip_prefix("--participant=").unwrap_or(""),
+                )?);
+            }
+            _ if arg.starts_with("--worker=") => {
+                participants.push(parse_worker_spec(
+                    arg.strip_prefix("--worker=").unwrap_or(""),
+                )?);
+            }
+            _ if arg.starts_with("--iterations=") => {
+                let value = arg.strip_prefix("--iterations=").unwrap_or_default();
+                iterations = value
+                    .parse::<u32>()
+                    .map_err(|_| format!("Error: invalid --iterations value `{value}`"))?;
+            }
+            _ if arg.starts_with("--cwd=") => {
+                cwd = PathBuf::from(arg.strip_prefix("--cwd=").unwrap_or_default());
+            }
+            _ if arg.starts_with("--timeout=") => {
+                let value = arg.strip_prefix("--timeout=").unwrap_or_default();
+                timeout_secs = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("Error: invalid --timeout value `{value}`"))?;
+            }
+            _ if arg.starts_with('-') => return Err(format!("Error: unknown option `{arg}`")),
+            _ => {
+                if prompt.is_some() {
+                    return Err(format!("Error: unexpected extra argument `{arg}`"));
+                }
+                prompt = Some(arg);
+            }
+        }
+    }
+
+    if participants.is_empty() {
+        participants = workers_from_config_or_default(
+            &config.discussion.default_participants,
+            default_discussion_participants,
+        );
+    }
+
+    Ok(ConvergeArgs {
+        prompt: prompt.ok_or_else(|| "Error: missing prompt argument".to_string())?,
+        cwd,
+        timeout_secs,
+        manager,
+        participants,
+        iterations,
+        profile_helpers,
+        learned,
     })
 }
 
@@ -577,6 +727,7 @@ where
         .and_then(|spec| parse_agent_spec_struct(spec).ok())
         .unwrap_or_else(default_manager);
     let mut profile_helpers = false;
+    let mut learned: Option<bool> = None;
 
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
@@ -612,6 +763,8 @@ where
             }
             "--docs" | "--api-docs" => docs = Some(true),
             "--no-docs" => docs = Some(false),
+            "--learned" => learned = Some(true),
+            "--no-learned" => learned = Some(false),
             "--helpers" | "--profile-helpers" => profile_helpers = true,
             "--no-helpers" => profile_helpers = false,
             "--docs-agent" => {
@@ -697,6 +850,7 @@ where
         docs,
         docs_agent,
         profile_helpers,
+        learned,
     })
 }
 
@@ -732,6 +886,7 @@ where
         .and_then(|spec| parse_agent_spec_struct(spec).ok())
         .unwrap_or_else(default_manager);
     let mut profile_helpers = false;
+    let mut learned: Option<bool> = None;
 
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
@@ -767,6 +922,8 @@ where
             }
             "--docs" | "--api-docs" => docs = Some(true),
             "--no-docs" => docs = Some(false),
+            "--learned" => learned = Some(true),
+            "--no-learned" => learned = Some(false),
             "--helpers" | "--profile-helpers" => profile_helpers = true,
             "--no-helpers" => profile_helpers = false,
             "--docs-agent" => {
@@ -855,18 +1012,19 @@ where
         docs,
         docs_agent,
         profile_helpers,
+        learned,
     })
 }
 
 pub fn print_help(default_timeout_secs: u64) {
     println!(
          "usage: agent-swarm [run] [--background] [--agent claude|codex|auto] [--model MODEL] [--persona NAME|--no-persona] [--cwd CWD] [--timeout SECONDS] [--quiet] prompt\n\
-         usage: agent-swarm swarm [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] prompt\n\
-         usage: agent-swarm fanout [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] prompt\n\
-         usage: agent-swarm discuss [--participant ROLE=AGENT[:MODEL]]... [--manager AGENT[:MODEL]] [--rounds N] [--parent ID] [--slice ID] [--docs] [--helpers] prompt\n\
+         usage: agent-swarm swarm [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
+         usage: agent-swarm fanout [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
+         usage: agent-swarm discuss [--participant ROLE=AGENT[:MODEL]]... [--manager AGENT[:MODEL]] [--rounds N] [--parent ID] [--slice ID] [--docs] [--helpers] [--no-learned] prompt\n\
          usage: agent-swarm metadirector [--model MODEL] [--cwd CWD] [--timeout SECONDS] prompt\n\
-         usage: agent-swarm audit [--focus all|simplify|harden|architecture|api-docs|tests] [--participant ROLE=AGENT[:MODEL]]... [--rounds N] [--docs|--no-docs] [--helpers] prompt\n\
-         usage: agent-swarm design [--focus all|visual-system|motion|interaction|accessibility|implementation] [--participant ROLE=AGENT[:MODEL]]... [--rounds N] [--helpers] prompt\n\
+         usage: agent-swarm audit [--focus all|simplify|harden|architecture|api-docs|tests] [--participant ROLE=AGENT[:MODEL]]... [--rounds N] [--docs|--no-docs] [--helpers] [--no-learned] prompt\n\
+         usage: agent-swarm design [--focus all|visual-system|motion|interaction|accessibility|implementation] [--participant ROLE=AGENT[:MODEL]]... [--rounds N] [--helpers] [--no-learned] prompt\n\
          usage: agent-swarm status [JOB_ID]\n\
          usage: agent-swarm result [JOB_ID]\n\
          usage: agent-swarm cancel JOB_ID\n\
@@ -1363,7 +1521,7 @@ mod tests {
             parse_args(["--persona=gemini-manager".to_string(), "hello".to_string()]).unwrap();
         assert_eq!(args.persona.as_deref(), Some("gemini-manager"));
         // Manager personas don't override the agent; it stays at the default.
-        assert_eq!(args.agent, AgentChoice::Claude);
+        assert_eq!(args.agent, load_default_agent());
 
         let args = parse_args([
             "--profile=systems-architect".to_string(),
@@ -1392,7 +1550,7 @@ mod tests {
         ])
         .unwrap();
         // Manager personas leave the agent at the default rather than overriding it.
-        assert_eq!(args.agent, AgentChoice::Claude);
+        assert_eq!(args.agent, load_default_agent());
         assert!(args.model.is_none());
 
         let args = parse_args([
