@@ -165,17 +165,25 @@ fn session_artifacts_json_from_dir(id: &str, dir: &Path) -> Result<serde_json::V
     }
     let reports_dir = dir.join("layer-reports");
     if let Ok(entries) = fs::read_dir(&reports_dir) {
-        for entry in entries.flatten().take(80) {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("md") {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    artifacts.push(serde_json::json!({
-                        "label": "layer-report",
-                        "path": path.display().to_string(),
-                        "mime": "text/markdown",
-                        "bytes": metadata.len()
-                    }));
-                }
+        // Collect the `.md` report paths first, then sort and cap. Applying
+        // `take(80)` directly to the OS directory order made both *which*
+        // reports appeared and their order nondeterministic — and could spend
+        // the cap on non-`.md` entries, yielding fewer than 80 real reports.
+        // Sort-then-take gives a stable, complete prefix of the report set.
+        let mut report_paths: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+            .collect();
+        report_paths.sort();
+        for path in report_paths.into_iter().take(80) {
+            if let Ok(metadata) = fs::metadata(&path) {
+                artifacts.push(serde_json::json!({
+                    "label": "layer-report",
+                    "path": path.display().to_string(),
+                    "mime": "text/markdown",
+                    "bytes": metadata.len()
+                }));
             }
         }
     }
@@ -293,6 +301,11 @@ impl SessionRepo for FileSessionRepo {
                 prompt_preview: prompt_preview(prompt),
             });
         }
+        // Deterministic enumeration: `read_dir` order is OS-dependent. Sort by
+        // session id so the listing is reproducible. Callers re-sort by
+        // `created_at_ms` with a *stable* sort, so this id order survives as the
+        // same-millisecond tiebreak — making the whole listing deterministic.
+        records.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         Ok(records)
     }
 
@@ -424,7 +437,7 @@ impl SessionRepo for MemSessionRepo {
 
     fn list(&self) -> Result<Vec<SessionIndexRecord>, RepoError> {
         let guard = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
-        let records = guard
+        let mut records: Vec<SessionIndexRecord> = guard
             .values()
             .map(|entry| SessionIndexRecord {
                 id: entry.id.clone(),
@@ -433,6 +446,9 @@ impl SessionRepo for MemSessionRepo {
                 prompt_preview: entry.prompt_preview.clone(),
             })
             .collect();
+        // Deterministic and consistent with `FileSessionRepo::list` (id-sorted),
+        // so the Mem double matches the File repo for replay/test parity.
+        records.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         Ok(records)
     }
 

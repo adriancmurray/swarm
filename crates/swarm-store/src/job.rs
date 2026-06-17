@@ -90,6 +90,11 @@ pub fn list_job_records_in(dir: &Path) -> Result<Vec<JobRecord>, String> {
             }
         }
     }
+    // Deterministic enumeration regardless of OS directory order (see the note
+    // in `FileSessionRepo::list`). Callers re-sort by `created_at_ms` with a
+    // stable sort, so this id order is the reproducible same-millisecond
+    // tiebreak.
+    records.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
     Ok(records)
 }
 
@@ -250,6 +255,43 @@ mod tests {
         let re_future = serde_json::to_string(&future).unwrap();
         assert!(re_future.contains("\"some_future_state\""));
         assert!(re_future.contains("\"unknown_bot\""));
+    }
+
+    #[test]
+    fn list_job_records_is_sorted_by_id_regardless_of_write_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let make = |id: &str| JobRecord {
+            id: id.into(),
+            status: JobStatus::Running,
+            agent: JobAgent::Gemini,
+            model: None,
+            mode: JobMode::Agent,
+            cwd: "/tmp".to_string(),
+            prompt_preview: "p".to_string(),
+            timeout_secs: 60,
+            created_at_ms: 100_000,
+            started_at_ms: None,
+            completed_at_ms: None,
+            pid: None,
+            exit_code: None,
+            prompt_path: "/tmp/p".to_string(),
+            stdout_path: "/tmp/o".to_string(),
+            stderr_path: "/tmp/e".to_string(),
+            result_path: "/tmp/r".to_string(),
+            allow_recursive_codex: false,
+        };
+        // Identical created_at_ms across all three: a caller's stable
+        // `sort_by_key(created_at_ms)` cannot disambiguate them, so the repo's
+        // id ordering is the only thing keeping the listing deterministic.
+        for id in ["job-c", "job-a", "job-b"] {
+            write_job_record_in(dir.path(), &make(id)).unwrap();
+        }
+        let ids: Vec<String> = list_job_records_in(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id.as_str().to_string())
+            .collect();
+        assert_eq!(ids, vec!["job-a", "job-b", "job-c"]);
     }
 
     #[test]

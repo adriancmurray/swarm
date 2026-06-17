@@ -188,7 +188,13 @@ impl JobRepo for MemJobRepo {
     }
 
     fn list(&self) -> Result<Vec<JobRecord>, RepoError> {
-        Ok(self.records.lock().unwrap().values().cloned().collect())
+        let mut records: Vec<JobRecord> =
+            self.records.lock().unwrap().values().cloned().collect();
+        // Deterministic, and consistent with `FileJobRepo` (id-sorted) so the
+        // Mem double is a faithful stand-in for replay/test harnesses. HashMap
+        // iteration order would otherwise vary run-to-run.
+        records.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        Ok(records)
     }
 
     fn save(&self, record: &JobRecord) -> Result<(), RepoError> {

@@ -1,17 +1,23 @@
 use super::Tool;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Registry of available tools, keyed by tool name.
+///
+/// Backed by a `BTreeMap` (not `HashMap`) so iteration — `list`,
+/// `to_openai_tools` — is ordered by tool name and therefore identical across
+/// processes. The serialized tools array is part of the prompt sent to the
+/// model; a per-run-random ordering would perturb weak-model tool choice and
+/// break prompt reproducibility, so the order is pinned here at the source.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: BTreeMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: BTreeMap::new(),
         }
     }
 
@@ -136,6 +142,49 @@ mod tests {
         registry.register(Arc::new(EchoTool));
         registry.register(Arc::new(EchoTool));
         assert_eq!(registry.list().len(), 1);
+    }
+
+    /// A second named tool so ordering tests have something to sort.
+    struct NamedTool(&'static str);
+
+    #[async_trait]
+    impl Tool for NamedTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "named test tool"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object", "properties": {} })
+        }
+        async fn execute(&self, _args: Value) -> anyhow::Result<String> {
+            Ok(self.0.to_string())
+        }
+    }
+
+    /// `list` and `to_openai_tools` are ordered by tool name regardless of
+    /// registration order — the BTreeMap backing makes the prompt's tools array
+    /// reproducible across processes.
+    #[test]
+    fn iteration_is_name_ordered_not_registration_ordered() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(NamedTool("zebra")));
+        registry.register(Arc::new(NamedTool("alpha")));
+        registry.register(Arc::new(NamedTool("mango")));
+
+        assert_eq!(registry.list(), vec!["alpha", "mango", "zebra"]);
+
+        let openai_tools = registry.to_openai_tools();
+        let names: Vec<&str> = openai_tools
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["alpha", "mango", "zebra"],
+            "tool order in the prompt must be name-sorted and deterministic"
+        );
     }
 
     #[test]

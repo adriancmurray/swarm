@@ -117,17 +117,25 @@ pub fn session_artifacts_json_from_dir(id: &str, dir: &Path) -> Result<serde_jso
     }
     let reports_dir = dir.join("layer-reports");
     if let Ok(entries) = fs::read_dir(&reports_dir) {
-        for entry in entries.flatten().take(80) {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("md") {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    artifacts.push(serde_json::json!({
-                        "label": "layer-report",
-                        "path": path.display().to_string(),
-                        "mime": "text/markdown",
-                        "bytes": metadata.len()
-                    }));
-                }
+        // Collect `.md` report paths first, then sort and cap. Applying
+        // `take(80)` to the raw OS directory order made both *which* reports
+        // appeared and their order nondeterministic, and could spend the cap on
+        // non-`.md` entries. Sort-then-take gives a stable, complete prefix.
+        // Mirrors `FileSessionRepo`'s artifact assembler (same v1 schema).
+        let mut report_paths: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+            .collect();
+        report_paths.sort();
+        for path in report_paths.into_iter().take(80) {
+            if let Ok(metadata) = fs::metadata(&path) {
+                artifacts.push(serde_json::json!({
+                    "label": "layer-report",
+                    "path": path.display().to_string(),
+                    "mime": "text/markdown",
+                    "bytes": metadata.len()
+                }));
             }
         }
     }
