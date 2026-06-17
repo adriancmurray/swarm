@@ -219,6 +219,65 @@ impl WorkerOutput {
     }
 }
 
+/// The deterministic collapse of a set of [`WorkerOutput`]s into a decision.
+///
+/// Pure output of [`judge`]: which workers passed the evidence gate, which the
+/// winner is, and the winner's quantized score. This is the typed result that a
+/// stochastic manager synthesis can be measured against — and the seam where
+/// cheap-model amplification (best-of-N, quorum) plugs in next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verdict {
+    /// At least one worker passed the gate.
+    pub accepted: bool,
+    /// Index (into the judged slice) of the highest-ranked surviving worker.
+    pub winner: Option<usize>,
+    /// Indices of workers dropped by the gate (`gate.verified == false`).
+    pub rejected: Vec<usize>,
+    /// The winner's score (quantized i64, citation-weighted), or 0 if none.
+    pub score: i64,
+}
+
+/// Deterministic decision-collapse over worker outputs — no LLM, no clock, no RNG.
+///
+/// Drops every worker whose evidence gate did not pass (`gate.verified == false`),
+/// then ranks the survivors by [`worker_score`]; the winner is the highest score,
+/// ties broken by the lower (first-seen) index so the result is total and
+/// reproducible. This turns `gate.verified` from advisory prompt text into a real
+/// selector — the precondition for best-of-N and verification chains (P1.5).
+pub fn judge(workers: &[WorkerOutput]) -> Verdict {
+    let mut rejected = Vec::new();
+    let mut best: Option<(usize, i64)> = None;
+    for (i, wo) in workers.iter().enumerate() {
+        if !wo.gate.verified {
+            rejected.push(i);
+            continue;
+        }
+        let score = worker_score(&wo.gate);
+        // Strictly-greater keeps the first-seen winner on a tie → stable, total.
+        let take = match best {
+            None => true,
+            Some((_, b)) => score > b,
+        };
+        if take {
+            best = Some((i, score));
+        }
+    }
+    Verdict {
+        accepted: best.is_some(),
+        winner: best.map(|(i, _)| i),
+        rejected,
+        score: best.map(|(_, s)| s).unwrap_or(0),
+    }
+}
+
+/// Quantized i64 rank for a gate-passing worker: more citations rank higher,
+/// evidence gaps penalize. Integer-only so ordering is total and reproducible
+/// (no float `partial_cmp`). Verified workers always have `evidence_gap_count == 0`
+/// and `citation_count >= 1`; the penalty term is defensive.
+fn worker_score(gate: &WorkerEvidenceGate) -> i64 {
+    (gate.citation_count as i64) * 1000 - (gate.evidence_gap_count as i64)
+}
+
 pub fn build_worker_prompt(task: &str, role: &str, context: Option<&str>) -> String {
     let mut prompt = format!(
         "You are the `{role}` worker in a stacked agent swarm.\n\
@@ -396,6 +455,26 @@ pub fn build_swarm_result_artifact(
         artifact.push_str("\n## Manager stderr\n\n");
         artifact.push_str(manager.stderr.trim());
         artifact.push('\n');
+    }
+
+    // Deterministic decision-collapse alongside the stochastic manager synthesis:
+    // a reproducible, no-LLM verdict over the evidence gates. Surfaces which
+    // worker the gate judge would pick, independent of the manager's prose.
+    let verdict = judge(workers);
+    artifact.push_str("\n## Deterministic Decision (gate judge)\n\n");
+    match verdict.winner {
+        Some(i) => artifact.push_str(&format!(
+            "accepted: true — winner: {} (score {}); {} of {} worker(s) rejected by the evidence gate\n",
+            workers[i].worker.role,
+            verdict.score,
+            verdict.rejected.len(),
+            workers.len(),
+        )),
+        None => artifact.push_str(&format!(
+            "accepted: false — no worker passed the evidence gate ({} of {} rejected)\n",
+            verdict.rejected.len(),
+            workers.len(),
+        )),
     }
 
     artifact.push_str("\n## Worker Outputs\n");
@@ -778,6 +857,62 @@ mod tests {
         );
     }
 
+    /// A cited compact packet that passes the evidence gate (gate.verified).
+    /// Mirrors `assess_worker_output_accepts_cited_compact_packet`.
+    fn verified_packet() -> RunOutcome {
+        output(
+            "Findings\n- Anchor: /path/to/swarm/crates/swarm-exec/src/synthesis.rs:199\nRisks\n- None.\nSteps\n- Synthesize.\nBlockers\n- None.\nTests\n- `cargo test -p swarm-exec`, exit_code: 0.\n",
+            "",
+            false,
+        )
+    }
+
+    #[test]
+    fn judge_empty_is_unaccepted() {
+        let v = judge(&[]);
+        assert!(!v.accepted);
+        assert_eq!(v.winner, None);
+        assert!(v.rejected.is_empty());
+        assert_eq!(v.score, 0);
+    }
+
+    #[test]
+    fn judge_drops_unverified_workers() {
+        let workers = vec![
+            wo("a", 1, output("uncited", "", false)), // nonzero exit -> unverified
+            wo("b", 0, output("", "", false)),        // empty -> unverified
+        ];
+        let v = judge(&workers);
+        assert!(!v.accepted);
+        assert_eq!(v.winner, None);
+        assert_eq!(v.rejected, vec![0, 1]);
+    }
+
+    #[test]
+    fn judge_selects_the_verified_survivor() {
+        let workers = vec![
+            wo("a", 0, output("uncited junk", "", false)), // unverified
+            wo("b", 0, verified_packet()),                 // verified
+        ];
+        let v = judge(&workers);
+        assert!(v.accepted);
+        assert_eq!(v.winner, Some(1));
+        assert_eq!(v.rejected, vec![0]);
+        assert!(v.score > 0);
+    }
+
+    #[test]
+    fn judge_breaks_ties_by_lower_index() {
+        let workers = vec![wo("a", 0, verified_packet()), wo("b", 0, verified_packet())];
+        let v = judge(&workers);
+        assert_eq!(
+            v.winner,
+            Some(0),
+            "equal scores must resolve to the first-seen worker"
+        );
+        assert!(v.rejected.is_empty());
+    }
+
     #[test]
     fn assess_worker_output_accepts_cited_compact_packet() {
         let stdout = "\
@@ -915,6 +1050,10 @@ Tests
 
         assert!(result.contains("(no manager output)"));
         assert!(result.contains("(no stdout)"));
+        // The deterministic gate-judge decision section is present; the lone
+        // empty-output worker is unverified, so nothing is accepted.
+        assert!(result.contains("## Deterministic Decision (gate judge)"));
+        assert!(result.contains("accepted: false"));
         assert!(transcript.contains("# Agent Swarm Fan-Out"));
         assert!(transcript.contains("(no output)"));
     }
