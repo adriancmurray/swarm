@@ -1799,6 +1799,23 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
     let session = DiscussionSession::create_converge(&args)?;
     println!("Converge Session ID: {}", session.id);
 
+    // Tracking record so converge runs are visible to `jobs`/`status`/monitor and
+    // MCP. Previously converge created none and emitted no events, so it was
+    // invisible to every inspection surface except its own layer reports.
+    let job_repo = FileJobRepo::new(job_store_dir().map_err(|e| e.to_string())?);
+    let mut tracking = job_repo
+        .create(JobSpec {
+            agent: JobAgent::Swarm,
+            model: Some(describe_spec(&args.manager)),
+            mode: JobMode::Other("converge".to_string()),
+            cwd: args.cwd.clone(),
+            prompt_preview: prompt_preview(&args.prompt),
+            prompt_text: args.prompt.clone(),
+            timeout_secs: args.timeout_secs,
+            allow_recursive_codex: false,
+        })
+        .map_err(|e| e.to_string())?;
+
     let config = swarm_kernel::config::load_config();
     let learned = LearnedRouting::snapshot(
         &config,
@@ -1817,8 +1834,6 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
     } else {
         String::new()
     };
-    let context_ref: Option<String> = if context_text.is_empty() { None } else { Some(context_text.clone()) };
-
     let mut current_prompt = args.prompt.clone();
 
     for iteration in 1..=args.iterations {
@@ -1837,6 +1852,10 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
             handles.push(std::thread::spawn(move || {
                 let spec = worker.spec.clone();
                 let role = worker.role.clone();
+                let _ = c_session.append_event(
+                    EventKind::WorkerStarted,
+                    serde_json::json!({ "role": &role, "agent": describe_spec(&spec) }),
+                );
                 let worker_chain = build_fallback_chain(
                     &role,
                     &spec,
@@ -1948,9 +1967,27 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
                     emit_reliability_events(&session, &worker.role, &worker.spec, &fallback);
                     match fallback.result {
                         Ok(out) => {
+                            let _ = session.append_event(
+                                EventKind::WorkerCompleted,
+                                serde_json::json!({
+                                    "role": &worker.role,
+                                    "agent": describe_spec(&worker.spec),
+                                    "exit_code": out.exit_status.unwrap_or(0),
+                                    "timed_out": out.timed_out,
+                                    "text": out.stdout.trim(),
+                                }),
+                            );
                             worker_outputs.push_str(&format!("\n### Proposed Plan from {}\n{}\n", worker.role, out.stdout.trim()));
                         }
                         Err(e) => {
+                            let _ = session.append_event(
+                                EventKind::WorkerFailed,
+                                serde_json::json!({
+                                    "role": &worker.role,
+                                    "agent": describe_spec(&worker.spec),
+                                    "error": &e,
+                                }),
+                            );
                             worker_outputs.push_str(&format!("\n### Failed Plan from {}\n{}\n", worker.role, e));
                         }
                     }
@@ -1962,6 +1999,10 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
         }
 
         // Now Director (Manager) synthesizes
+        let _ = session.append_event(
+            EventKind::ManagerStarted,
+            serde_json::json!({ "agent": describe_spec(&args.manager), "iteration": iteration }),
+        );
         let manager_chain = build_fallback_chain(
             "manager",
             &args.manager,
@@ -1992,7 +2033,6 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
         };
 
         println!("\n[Director] Integrating proposals...");
-        let manager_started = Instant::now();
         let manager_fallback = execute_with_fallback(
             &BackendRegistry::from_config(&config),
             &manager_chain,
@@ -2014,6 +2054,16 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
                     "completed",
                     out.stdout.trim(),
                 )?;
+                let _ = session.append_event(
+                    EventKind::ManagerCompleted,
+                    serde_json::json!({
+                        "agent": describe_spec(&args.manager),
+                        "iteration": iteration,
+                        "exit_code": out.exit_status.unwrap_or(0),
+                        "timed_out": out.timed_out,
+                        "text": out.stdout.trim(),
+                    }),
+                );
                 println!("\nConvergence Output:\n{}", out.stdout.trim());
                 let next_baseline = out.stdout.trim().to_string();
                 // Deterministic early-stop: from iteration 2 on (a prior baseline
@@ -2051,12 +2101,36 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
                     "failed",
                     &e,
                 )?;
+                let _ = session.append_event(
+                    EventKind::ManagerFailed,
+                    serde_json::json!({ "agent": describe_spec(&args.manager), "error": &e }),
+                );
+                tracking.status = JobStatus::Failed;
+                tracking.completed_at_ms = Some(now_ms());
+                tracking.exit_code = Some(1);
+                let _ = job_repo.save(&tracking);
                 println!("\nConvergence Error: {}", e);
                 return Err(format!("Manager synthesis failed: {}", e));
             }
         }
     }
 
+    // Finalize: the converged baseline is the result; record it and close the
+    // tracking record + session so the run shows complete in jobs/sessions/MCP.
+    write_text_atomic(&session.summary_path, current_prompt.trim())?;
+    tracking.status = JobStatus::Completed;
+    tracking.completed_at_ms = Some(now_ms());
+    tracking.exit_code = Some(0);
+    job_repo.save(&tracking).map_err(|e| e.to_string())?;
+    session.append_event(
+        EventKind::SessionCompleted,
+        serde_json::json!({
+            "failed": false,
+            "summary_path": session.summary_path.display().to_string(),
+            "events_path": session.events_path.display().to_string(),
+        }),
+    )?;
+    println!("\nSession: {}", session.id);
     Ok(0)
 }
 
