@@ -84,22 +84,20 @@ For any claimed bug/finding, spawn N independent skeptics prompted to *refute* i
 
 ---
 
-## The work queue (status as of 2026-06-16)
+## The work queue (status as of 2026-06-16, end of session)
 
-Determinism pillar — **collection/FS/Mem ordering: DONE** (committed):
-- ✅ Total score comparators (`telemetry.rs` `score_key`)
-- ✅ `ToolRegistry` HashMap→BTreeMap (deterministic prompt tools)
-- ✅ `read_dir` id-sorting in File repos + the `take(80)` artifact bug (store + mcp)
-- ✅ Mem repos `list()` id-sorted (faithful deterministic replay backend)
+**DONE this session (committed on `evolve/p0-determinism-foundation`):**
+- ✅ Determinism ordering — score comparators (`telemetry.rs` `score_key`), `ToolRegistry` HashMap→BTreeMap, `read_dir` id-sorting + the `take(80)` artifact bug (store + mcp), Mem repos `list()` id-sorted.
+- ✅ **Canonicalizer (P0)** — pure event projection + `canonical_run_hash` in `swarm-contracts/canonical.rs`, from a data-driven spec ([docs/specs/canonicalizer-spec.md](specs/canonicalizer-spec.md), all 31 `EventKind` variants). 8 tests.
+- ✅ **`WorkerOutput` keystone (P1)** — the anonymous `(WorkerSpec, i32, RunOutcome)` tuple is now a named `WorkerOutput { worker, exit_code, outcome, gate }` carrying the gate computed once. Behavior-preserving (existing prompt tests pass unchanged) + a keystone test.
+- ✅ **`judge()` selector (P1.5 core)** — `Verdict` + pure `judge(&[WorkerOutput]) -> Verdict` (drops `gate.verified == false`, ranks by quantized score, stable tie-break). Wired non-invasively into the result artifact's "Deterministic Decision" section. `gate.verified` is now a real selector.
 
-Next, in dependency order (easiest → hardest):
-1. **Canonicalizer (P0)** — pure event projection for parity/run-hash. Needs a *data-driven spec* of volatile vs functional payload fields per `EventKind` (don't regex-guess). See [docs/specs/canonicalizer-spec.md](specs/canonicalizer-spec.md). *(in progress)*
-2. **`WorkerOutput` keystone (P1)** — replace the worker→manager prose concat with a typed `{role, spec, outcome, gate}` channel in `swarm-exec`. Pin the manager prompt bytes with a snapshot test. Highest-leverage composability unlock. Touches `synthesis.rs` + `orchestration.rs` — do it *after* WIP there is committed.
-3. **Amplification, no framework (P1.5)** — `judge(&[WorkerOutput]) -> Verdict` (gate-filter + best-of-N), and wire the dead `verify_metadirector_contract` as a retry-once predicate. All free functions. This is where goal #3 ships.
-4. **Content cache + seeds (P2)** — `CacheRepo` (mirror `TelemetryRepo`, File/Mem) wrapping `execute_with_fallback`; `seed`/`temperature` on `BackendRequest` (HTTP/native only — fix the `0.7` hardcode at `provider/mod.rs:192`). Subprocess backends rely on the cache, not seeds.
-5. **converge fix + observability (P3)** — Jaccard early-stop; add the missing `JobRecord`/event/summary plumbing so converge is visible to monitor/sessions/MCP.
-6. **Block/Plan/Scheduler IR (P4, CONDITIONAL)** — only if a real second DAG consumer appears. Otherwise skip; the value already shipped in P1–P3.
-7. **Replay surface (P5)** — `swarm replay` (zero LLM calls, matching canonical run-hash); `--json` result envelopes for all verbs.
+**Next, in dependency order (easiest → hardest):**
+1. **Finish P1.5 amplification** — now that `judge()` exists: (a) **gate-as-filter** into the *manager prompt* itself (drop/down-weight unverified workers before synthesis — a real behavior change, gate it behind config); (b) **best-of-N** — a sample-loop in `run_swarm` (same spec ×N with per-sample FNV-1a seeds) collapsed by `judge()`; (c) wire the dead `verify_metadirector_contract` as a retry-once predicate with a fail-closed `FALSIFIED:` parser.
+2. **Content cache + seeds (P2)** — `CacheRepo` (mirror `TelemetryRepo`, File/Mem) wrapping `execute_with_fallback`; `seed`/`temperature` on `BackendRequest` (HTTP/native only — fix the `0.7` hardcode at `provider/mod.rs:192`). Subprocess backends rely on the cache, not seeds. Now unblocked: the canonicalizer + `canonical_run_hash` are ready for the replay parity gate.
+3. **converge fix + observability (P3)** — Jaccard early-stop; route converge's raw string concat (`orchestration.rs:1809`) through `WorkerOutput`; add the missing `JobRecord`/event/summary plumbing so converge is visible to monitor/sessions/MCP.
+4. **Block/Plan/Scheduler IR (P4, CONDITIONAL)** — only if a real second DAG consumer appears. Otherwise skip; the value already shipped in P1–P3.
+5. **Replay surface (P5)** — `swarm replay` (zero LLM calls, matching `canonical_run_hash`); `--json` result envelopes for all verbs.
 
 Pick the lowest-numbered unblocked item, run the loop, leave it green.
 
