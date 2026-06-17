@@ -153,6 +153,12 @@ pub struct ReliabilityConfig {
     pub learned_routing: bool,
     #[serde(default = "default_learned_min_observations")]
     pub learned_min_observations: u32,
+    /// Opt-in content-addressed cache of successful worker dispatches. Off by
+    /// default; when true, `swarm-exec` caches clean worker outcomes keyed by the
+    /// request content, giving zero-token replay for the default (subprocess)
+    /// backends. See `swarm-exec/src/cache.rs`.
+    #[serde(default)]
+    pub cache: bool,
 }
 
 impl Default for ReliabilityConfig {
@@ -163,6 +169,7 @@ impl Default for ReliabilityConfig {
             fallback_chain: Vec::new(),
             learned_routing: default_learned_routing(),
             learned_min_observations: default_learned_min_observations(),
+            cache: false,
         }
     }
 }

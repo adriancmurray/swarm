@@ -35,6 +35,7 @@ use swarm_store::repos::telemetry_repo::TelemetryRepo;
 use swarm_store::store::{job_store_dir, now_ms, write_text_atomic};
 
 use crate::backend_registry::BackendRegistry;
+use crate::cache::{cache_key, with_cache, CacheRepo, FileCacheRepo};
 use crate::executor::{
     default_telemetry_repo, execute_partner, execute_with_fallback,
     execute_with_fallback_chunks, output_record_status, output_status_code,
@@ -50,6 +51,17 @@ use crate::synthesis::{
     build_swarm_result_artifact, build_swarm_transcript, build_worker_prompt,
     capped_manager_output, preview_for_event, render_context_block, WorkerOutput,
 };
+
+/// Build the optional worker-dispatch cache from config. Returns `None` when
+/// caching is disabled (`[reliability].cache = false`, the default) or no swarm
+/// home is resolvable — in both cases dispatch degrades to uncached, never errors.
+fn make_worker_cache(config: &SwarmConfig) -> Option<Arc<dyn CacheRepo>> {
+    if !config.reliability.cache {
+        return None;
+    }
+    let dir = swarm_store::store::swarm_home()?.join("cache");
+    Some(Arc::new(FileCacheRepo::new(dir)))
+}
 
 pub fn run_partner_foreground(
     args: &Args,
@@ -358,6 +370,13 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
     // Render to an owned String so worker threads can share a borrow.
     let context_ref: Option<String> = context_block;
 
+    // Optional content cache for worker dispatch — the determinism/replay spine.
+    // Worker prompts are deterministic in (task, role, context), so re-running the
+    // same swarm hits the cache for zero-token replay. Default-off; shared across
+    // worker threads via Arc. None (disabled or no home) is a transparent
+    // pass-through, byte-identical to having no cache.
+    let worker_cache = make_worker_cache(&config);
+
     let mut handles = Vec::new();
     for worker in args.workers.clone() {
         let prompt = build_worker_prompt(&args.prompt, &worker.role, context_ref.as_deref());
@@ -366,6 +385,7 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
         let session = session.clone();
         let config = config.clone();
         let learned = learned.clone();
+        let cache = worker_cache.clone();
         handles.push(thread::spawn(move || {
             learned.emit_event(&session, &worker.role);
             let _ = session.append_event(
@@ -394,13 +414,23 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
                 learned.candidates_for(&worker.role),
             );
             let started = Instant::now();
-            let fallback = execute_with_fallback(
-                &BackendRegistry::from_config(&config),
-                &chain,
-                &call_args,
-                &prompt,
-                &worker.role,
-                &config.reliability,
+            let (cache_key_hash, cache_fingerprint) =
+                cache_key(&prompt, &worker.spec, &call_args.cwd, timeout_secs);
+            let fallback = with_cache(
+                cache.as_deref(),
+                &cache_key_hash,
+                &cache_fingerprint,
+                &worker.spec,
+                || {
+                    execute_with_fallback(
+                        &BackendRegistry::from_config(&config),
+                        &chain,
+                        &call_args,
+                        &prompt,
+                        &worker.role,
+                        &config.reliability,
+                    )
+                },
             );
             emit_reliability_events(&session, &worker.role, &worker.spec, &fallback);
             let ran = fallback.used.clone();

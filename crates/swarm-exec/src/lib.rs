@@ -26,6 +26,7 @@
 
 pub mod backend_registry;
 pub mod background_runtime;
+pub mod cache;
 pub mod cli_backend;
 pub mod executor;
 pub mod monitor_runtime;
