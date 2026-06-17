@@ -1690,6 +1690,34 @@ fn run_profile_helpers(
     Ok(context)
 }
 
+/// Converge stops early once successive baselines are at least this similar.
+/// 0.95 = "almost identical token sets" — high enough that an early stop means
+/// the plan genuinely stabilized. ponytail: a token-set Jaccard heuristic; the
+/// upgrade path is a semantic / embedding similarity if word-set proves too blunt.
+const CONVERGE_STABILITY_THRESHOLD: f64 = 0.95;
+
+/// Normalized-token Jaccard similarity in `[0.0, 1.0]`: `|A∩B| / |A∪B|` over the
+/// lowercased alphanumeric word sets of the two texts. Deterministic (set-size
+/// counts, not iteration order). Converge's early-stop signal — when the manager
+/// baseline stops changing round-to-round, further iterations add nothing.
+fn jaccard_similarity(a: &str, b: &str) -> f64 {
+    use std::collections::HashSet;
+    let tokens = |s: &str| -> HashSet<String> {
+        s.to_ascii_lowercase()
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string())
+            .collect()
+    };
+    let sa = tokens(a);
+    let sb = tokens(b);
+    let union = sa.union(&sb).count();
+    if union == 0 {
+        return 1.0; // two empty texts are trivially identical
+    }
+    sa.intersection(&sb).count() as f64 / union as f64
+}
+
 pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
     let session = DiscussionSession::create_converge(&args)?;
     println!("Converge Session ID: {}", session.id);
@@ -1910,7 +1938,32 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
                     out.stdout.trim(),
                 )?;
                 println!("\nConvergence Output:\n{}", out.stdout.trim());
-                current_prompt = out.stdout.trim().to_string(); // Loop feedback
+                let next_baseline = out.stdout.trim().to_string();
+                // Deterministic early-stop: from iteration 2 on (a prior baseline
+                // exists) and before the final round, halt if the baseline barely
+                // changed — further iterations would burn budget for no gain.
+                let converged = iteration > 1
+                    && iteration < args.iterations
+                    && jaccard_similarity(&current_prompt, &next_baseline)
+                        >= CONVERGE_STABILITY_THRESHOLD;
+                current_prompt = next_baseline; // Loop feedback
+                if converged {
+                    println!(
+                        "\n[Director] Baseline stabilized at iteration {iteration}; converged early."
+                    );
+                    let _ = session.append_layer_report(
+                        "manager",
+                        "manager",
+                        &describe_spec(&args.manager),
+                        None,
+                        "converged",
+                        &format!(
+                            "early-stop at iteration {iteration}/{}: baseline Jaccard >= {CONVERGE_STABILITY_THRESHOLD}",
+                            args.iterations
+                        ),
+                    );
+                    break;
+                }
             }
             Err(e) => {
                 session.append_layer_report(
@@ -1928,4 +1981,39 @@ pub fn run_converge(args: ConvergeArgs) -> Result<i32, String> {
     }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jaccard_identical_disjoint_and_partial() {
+        assert_eq!(jaccard_similarity("alpha beta gamma", "alpha beta gamma"), 1.0);
+        assert_eq!(jaccard_similarity("alpha beta", "gamma delta"), 0.0);
+        assert_eq!(jaccard_similarity("", ""), 1.0, "two empty texts are identical");
+        // {a,b,c} vs {b,c,d} => intersection 2, union 4 => 0.5
+        assert!((jaccard_similarity("a b c", "b c d") - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn jaccard_ignores_case_and_punctuation() {
+        assert_eq!(jaccard_similarity("Alpha, Beta!  Gamma.", "gamma alpha beta"), 1.0);
+    }
+
+    #[test]
+    fn near_identical_baselines_clear_the_threshold_but_rewrites_dont() {
+        // 50 unique tokens; changing exactly one => intersection 49, union 51
+        // => Jaccard ≈ 0.96, above the 0.95 bar. (A small vocab would dip below,
+        // which is correct: the metric is set-based.)
+        let base: String = (0..50).map(|i| format!("tok{i} ")).collect();
+        let tweaked = base.replace("tok49 ", "toknew ");
+        assert!(
+            jaccard_similarity(&base, &tweaked) >= CONVERGE_STABILITY_THRESHOLD,
+            "a single-token change in a long baseline reads as converged"
+        );
+        // A wholesale rewrite (disjoint vocabulary) must NOT trip the early stop.
+        let rewritten: String = (100..150).map(|i| format!("word{i} ")).collect();
+        assert!(jaccard_similarity(&base, &rewritten) < CONVERGE_STABILITY_THRESHOLD);
+    }
 }
