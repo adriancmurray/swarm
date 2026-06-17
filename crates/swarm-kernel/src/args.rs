@@ -50,6 +50,11 @@ pub struct SwarmArgs {
     /// re-enables it when `[reliability].learned_routing = false`. `None`
     /// (default) means "use the config key" (which defaults to true).
     pub learned: Option<bool>,
+    /// Best-of-N sampling. `1` (default) is ordinary role-based fanout. `>1`
+    /// switches to best-of-N: the manager spec is sampled this many times as
+    /// independent candidates (cache bypassed for diversity) and a deterministic
+    /// gate judge picks the winner — no manager synthesis step. From `--best-of N`.
+    pub best_of: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +310,7 @@ where
     let mut slice = None;
     let mut inject_context: Option<bool> = None;
     let mut learned: Option<bool> = None;
+    let mut best_of: u32 = 1;
 
     let mut iter = raw.into_iter();
     while let Some(arg) = iter.next() {
@@ -312,6 +318,12 @@ where
             "-h" | "--help" => {
                 print_help(timeout_secs);
                 std::process::exit(0);
+            }
+            "--best-of" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Error: --best-of requires a value".to_string())?;
+                best_of = parse_best_of(&value)?;
             }
             "--manager" => {
                 let value = iter
@@ -354,6 +366,9 @@ where
                     .next()
                     .ok_or_else(|| "Error: --slice requires a value".to_string())?;
                 slice = Some(value);
+            }
+            _ if arg.starts_with("--best-of=") => {
+                best_of = parse_best_of(arg.strip_prefix("--best-of=").unwrap_or(""))?;
             }
             _ if arg.starts_with("--manager=") => {
                 manager = parse_agent_spec_struct(arg.strip_prefix("--manager=").unwrap_or(""))?;
@@ -406,7 +421,23 @@ where
         slice,
         inject_context,
         learned,
+        best_of,
     })
+}
+
+/// Parse and validate the `--best-of N` value: a positive integer, capped to a
+/// sane maximum so a typo can't spawn thousands of dispatches.
+fn parse_best_of(value: &str) -> Result<u32, String> {
+    let n = value
+        .parse::<u32>()
+        .map_err(|_| format!("Error: invalid --best-of value `{value}` (want a positive integer)"))?;
+    if n == 0 {
+        return Err("Error: --best-of must be at least 1".to_string());
+    }
+    if n > 32 {
+        return Err("Error: --best-of is capped at 32".to_string());
+    }
+    Ok(n)
 }
 
 pub fn parse_discuss_args<I>(raw: I) -> Result<DiscussArgs, String>
@@ -1019,8 +1050,9 @@ where
 pub fn print_help(default_timeout_secs: u64) {
     println!(
          "usage: agent-swarm [run] [--background] [--agent claude|codex|auto] [--model MODEL] [--persona NAME|--no-persona] [--cwd CWD] [--timeout SECONDS] [--quiet] prompt\n\
-         usage: agent-swarm swarm [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
-         usage: agent-swarm fanout [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
+         usage: agent-swarm swarm [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--best-of N] [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
+         usage: agent-swarm fanout [--manager AGENT[:MODEL]] [--worker ROLE=AGENT[:MODEL]]... [--best-of N] [--parent ID] [--slice ID] [--cwd CWD] [--timeout SECONDS] [--no-learned] prompt\n\
+         note: --best-of N samples the manager agent N times and picks the gate judge's winner (no synthesis); cache is bypassed for sample diversity.\n\
          usage: agent-swarm discuss [--participant ROLE=AGENT[:MODEL]]... [--manager AGENT[:MODEL]] [--rounds N] [--parent ID] [--slice ID] [--docs] [--helpers] [--no-learned] prompt\n\
          usage: agent-swarm metadirector [--model MODEL] [--cwd CWD] [--timeout SECONDS] prompt\n\
          usage: agent-swarm audit [--focus all|simplify|harden|architecture|api-docs|tests] [--participant ROLE=AGENT[:MODEL]]... [--rounds N] [--docs|--no-docs] [--helpers] [--no-learned] prompt\n\
@@ -1694,6 +1726,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args.inject_context, None);
+    }
+
+    #[test]
+    fn parse_swarm_args_best_of_parses_and_validates() {
+        let map = |a: &[&str]| parse_swarm_args(a.iter().map(|s| s.to_string()));
+        // Default is 1 (ordinary role fanout).
+        assert_eq!(map(&["do it"]).unwrap().best_of, 1);
+        // Separate value and inline forms both parse.
+        assert_eq!(map(&["--best-of", "4", "do it"]).unwrap().best_of, 4);
+        assert_eq!(map(&["--best-of=3", "do it"]).unwrap().best_of, 3);
+        // Invalid: zero, non-numeric, and over the cap are rejected.
+        assert!(map(&["--best-of", "0", "x"]).is_err());
+        assert!(map(&["--best-of", "abc", "x"]).is_err());
+        assert!(map(&["--best-of", "999", "x"]).is_err());
     }
 
     #[test]

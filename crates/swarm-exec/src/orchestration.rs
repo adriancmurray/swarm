@@ -64,6 +64,35 @@ fn make_worker_cache(config: &SwarmConfig) -> Option<Arc<dyn CacheRepo>> {
     Some(Arc::new(FileCacheRepo::new(dir)))
 }
 
+/// Best-of-N collapse: the gate judge's winner among the candidate runs becomes
+/// the run's output — no manager LLM call. Falls back to the first candidate when
+/// none passed the gate, so best-of always returns an answer. Emits a
+/// `best_of_selected` event recording the deterministic choice.
+fn select_best_of(
+    workers: &[WorkerOutput],
+    session: &DiscussionSession,
+) -> Result<swarm_kernel::backend_abi::RunOutcome, String> {
+    let verdict = crate::synthesis::judge(workers);
+    let winner = verdict
+        .winner
+        .or(if workers.is_empty() { None } else { Some(0) });
+    let _ = session.append_event(
+        EventKind::Other("best_of_selected".to_string()),
+        serde_json::json!({
+            "candidates": workers.len(),
+            "accepted": verdict.accepted,
+            "winner": winner,
+            "winner_role": winner.map(|i| workers[i].worker.role.clone()),
+            "rejected": verdict.rejected.len(),
+            "score": verdict.score,
+        }),
+    );
+    match winner {
+        Some(i) => Ok(workers[i].outcome.clone()),
+        None => Err("best-of-n: no candidates produced output".to_string()),
+    }
+}
+
 pub fn run_partner_foreground(
     args: &Args,
     prompt: &str,
@@ -288,7 +317,7 @@ fn emit_reliability_events(
     }
 }
 
-pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
+pub fn run_swarm(mut args: SwarmArgs) -> Result<i32, String> {
     if args.workers.is_empty() {
         return Err("Error: swarm requires at least one available worker".to_string());
     }
@@ -376,7 +405,26 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
     // same swarm hits the cache for zero-token replay. Default-off; shared across
     // worker threads via Arc. None (disabled or no home) is a transparent
     // pass-through, byte-identical to having no cache.
-    let worker_cache = make_worker_cache(&config);
+    // Best-of-N: sample the manager spec N times as independent candidates; the
+    // gate judge picks the winner instead of a manager synthesis step. The cache
+    // is bypassed so the N samples are independent stochastic draws — a cached
+    // identical prompt would return N copies of one draw and kill the diversity
+    // best-of-N depends on (the default subprocess agents expose no seed).
+    let best_of = args.best_of.max(1);
+    if best_of > 1 {
+        args.workers = (1..=best_of)
+            .map(|i| WorkerSpec {
+                role: format!("candidate-{i}"),
+                spec: args.manager.clone(),
+                timeout_secs: Some(args.timeout_secs),
+            })
+            .collect();
+    }
+    let worker_cache = if best_of > 1 {
+        None
+    } else {
+        make_worker_cache(&config)
+    };
 
     let mut handles = Vec::new();
     for worker in args.workers.clone() {
@@ -528,15 +576,34 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
         }
     }
 
-    // Gate-as-filter (opt-in): give the manager only gate-passing workers so a
-    // weak synthesizer reasons over verified evidence. Falls back to all when
-    // none passed. The full set is still recorded in the result artifact below.
-    let synthesis_prompt = if config.reliability.gate_filter {
-        let filtered = verified_for_manager(&worker_results);
-        build_manager_prompt(&args.prompt, &filtered, context_ref.as_deref())
+    // Best-of-N picks the deterministic gate-judge winner among the candidate
+    // samples (no manager LLM call); otherwise run ordinary manager synthesis.
+    // Each branch yields (output, the spec that produced it, the args to print with).
+    let (mut output, ran_spec, print_args) = if best_of > 1 {
+        let out = select_best_of(&worker_results, &session)?;
+        let print_args = Args {
+            prompt: String::new(),
+            cwd: args.cwd.clone(),
+            timeout_secs: args.timeout_secs,
+            quiet: true,
+            agent: args.manager.agent,
+            agent_custom: args.manager.custom.clone(),
+            model: args.manager.model.clone(),
+            persona: None,
+            background: false,
+            allow_bypass_permissions: false,
+        };
+        (out, args.manager.clone(), print_args)
     } else {
-        build_manager_prompt(&args.prompt, &worker_results, context_ref.as_deref())
-    };
+        // Gate-as-filter (opt-in): give the manager only gate-passing workers so a
+        // weak synthesizer reasons over verified evidence. Falls back to all when
+        // none passed. The full set is still recorded in the result artifact below.
+        let synthesis_prompt = if config.reliability.gate_filter {
+            let filtered = verified_for_manager(&worker_results);
+            build_manager_prompt(&args.prompt, &filtered, context_ref.as_deref())
+        } else {
+            build_manager_prompt(&args.prompt, &worker_results, context_ref.as_deref())
+        };
     let manager_args = Args {
         prompt: synthesis_prompt.clone(),
         cwd: args.cwd,
@@ -573,7 +640,7 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
     );
     emit_reliability_events(&session, "manager", &args.manager, &manager_fallback);
     let manager_ran = manager_fallback.used.clone();
-    let mut output = match manager_fallback.result {
+        let output = match manager_fallback.result {
         Ok(output) => {
             record_agent_observation(
                 "fanout-manager",
@@ -613,7 +680,9 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
             tracking.exit_code = Some(1);
             job_repo.save(&tracking).map_err(|e| e.to_string())?;
             return Err(err);
-        }
+            }
+        };
+        (output, manager_ran, manager_args)
     };
     output.stdout = capped_manager_output(&output.stdout);
     let code = output_status_code(&output);
@@ -662,8 +731,8 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
         }),
     )?;
     print_partner_output(
-        swarm_kernel::resolver::resolve_agent(manager_ran.agent)?,
-        &manager_args,
+        swarm_kernel::resolver::resolve_agent(ran_spec.agent)?,
+        &print_args,
         output,
     )?;
     println!("\nSession: {}", session.id);
