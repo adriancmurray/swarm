@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="swarm — architecture: the layered crate stack, runtime data flow, and where the determinism + amplification blocks attach.">
+  <title>swarm — Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg-darker:hsl(160,22%,4%);--bg-dark:hsl(165,24%,7%);
+      --bg-card:rgba(15,24,22,0.7);--border-muted:rgba(255,255,255,0.07);
+      --border-glow:rgba(40,184,135,0.24);
+      --green:oklch(0.76 0.18 145);--cyan:oklch(0.75 0.18 190);--yellow:oklch(0.82 0.16 85);--red:oklch(0.65 0.2 25);
+      --font-sans:'Inter',system-ui,sans-serif;--font-display:'Outfit',var(--font-sans);--font-mono:'JetBrains Mono',monospace;
+      --text-muted:#a5b1c2;
+    }
+    html{background:var(--bg-darker);color:#f5f6fa;font-family:var(--font-sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+    body{background:radial-gradient(circle at 50% 0%,var(--bg-dark) 0%,var(--bg-darker) 100%);min-height:100vh;padding:0 0 80px}
+    .container{max-width:1080px;margin:0 auto;padding:0 24px}
+    header.top{padding:64px 0 24px;text-align:center}
+    .pill{display:inline-block;padding:6px 14px;border-radius:999px;font-size:0.75rem;letter-spacing:0.08em;text-transform:uppercase;background:rgba(40,184,135,0.12);border:1px solid var(--border-glow);color:oklch(0.78 0.15 150);margin-bottom:20px}
+    h1{font-family:var(--font-display);font-weight:800;font-size:clamp(2.2rem,5vw,3.4rem);letter-spacing:-0.02em;margin-bottom:14px}
+    h1 .g{background:linear-gradient(90deg,var(--cyan),var(--yellow));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+    header.top p{color:var(--text-muted);max-width:640px;margin:0 auto;font-size:1.08rem}
+    section{margin-top:56px}
+    .sec-head{margin-bottom:18px}
+    .kicker{font-family:var(--font-mono);font-size:0.78rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px}
+    .sec-head h2{font-family:var(--font-display);font-weight:700;font-size:1.7rem}
+    .sec-head p{color:var(--text-muted);margin-top:6px;max-width:760px}
+    .figure{background:rgba(0,0,0,0.18);border:1px solid var(--border-muted);border-radius:16px;padding:24px;overflow-x:auto}
+    svg{display:block;width:100%;height:auto;min-width:680px}
+    .legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;font-size:0.85rem;color:var(--text-muted)}
+    .legend span{display:inline-flex;align-items:center;gap:8px}
+    .sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+    .note{margin-top:14px;font-size:0.9rem;color:var(--text-muted)}
+    .note code{font-family:var(--font-mono);font-size:0.82em;background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;color:var(--cyan)}
+    footer{margin-top:64px;text-align:center;color:var(--text-muted);font-size:0.82rem;border-top:1px solid var(--border-muted);padding-top:28px}
+    a{color:var(--cyan);text-decoration:none}
+    /* SVG shared text */
+    .t{font-family:var(--font-sans);fill:#e7ecea}
+    .tb{font-family:var(--font-display);font-weight:700;fill:#fff}
+    .tm{font-family:var(--font-mono);fill:var(--text-muted)}
+    .crate{font-family:var(--font-mono);font-weight:600;fill:#fff}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="top">
+      <div class="pill">Architecture · 2026-06-16</div>
+      <h1>swarm <span class="g">architecture</span></h1>
+      <p>A dependency-light, local-first orchestration engine. One strict downward dependency DAG; leaf-level seams are clean blocks. ~39k LOC across 9 crates.</p>
+    </header>
+
+    <!-- FIGURE 1: Layered crate stack -->
+    <section>
+      <div class="sec-head">
+        <div class="kicker">Structure</div>
+        <h2>The layered crate stack</h2>
+        <p>Every arrow points to a dependency. Nothing points up. The foundation depends only on <code>serde</code>; no layer reaches across another.</p>
+      </div>
+      <div class="figure">
+        <svg viewBox="0 0 960 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="swarm crate dependency stack">
+          <defs>
+            <marker id="arr" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L6,3 L0,6 Z" fill="rgba(40,184,135,0.7)"/>
+            </marker>
+            <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="rgba(40,184,135,0.10)"/>
+              <stop offset="100%" stop-color="rgba(0,206,201,0.05)"/>
+            </linearGradient>
+          </defs>
+
+          <!-- main stack column x: 60..620 -->
+          <!-- Layer: Surface -->
+          <g>
+            <rect x="60" y="20" width="560" height="74" rx="12" fill="url(#band)" stroke="rgba(0,206,201,0.3)"/>
+            <text class="tm" x="76" y="42" font-size="11">SURFACE</text>
+            <rect x="76" y="50" width="250" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="crate" x="92" y="71" font-size="13">swarm-cli</text>
+            <text class="tm" x="180" y="71" font-size="10">verbs · parsing · read cmds</text>
+            <rect x="346" y="50" width="258" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="crate" x="362" y="71" font-size="13">swarm-mcp</text>
+            <text class="tm" x="452" y="71" font-size="10">MCP server · schema · reports</text>
+          </g>
+
+          <!-- Layer: Orchestration -->
+          <g>
+            <rect x="60" y="124" width="560" height="74" rx="12" fill="url(#band)" stroke="var(--border-glow)"/>
+            <text class="tm" x="76" y="146" font-size="11">ORCHESTRATION — swarm-exec</text>
+            <rect x="76" y="154" width="120" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="86" y="174" font-size="11">orchestration</text>
+            <rect x="206" y="154" width="100" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="216" y="174" font-size="11">synthesis</text>
+            <rect x="316" y="154" width="92" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="326" y="174" font-size="11">executor</text>
+            <rect x="418" y="154" width="92" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="428" y="174" font-size="11">sessions</text>
+            <rect x="520" y="154" width="84" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="530" y="174" font-size="11">monitors</text>
+          </g>
+
+          <!-- Layer: Kernel -->
+          <g>
+            <rect x="60" y="228" width="560" height="74" rx="12" fill="url(#band)" stroke="var(--border-glow)"/>
+            <text class="tm" x="76" y="250" font-size="11">KERNEL — swarm-kernel (stateless)</text>
+            <rect x="76" y="258" width="92" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="86" y="278" font-size="11">routing</text>
+            <rect x="178" y="258" width="110" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="188" y="278" font-size="11">classifier</text>
+            <rect x="298" y="258" width="84" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="308" y="278" font-size="11">config</text>
+            <rect x="392" y="258" width="76" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="402" y="278" font-size="11">args</text>
+            <rect x="478" y="258" width="126" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="488" y="278" font-size="11">backend-abi</text>
+          </g>
+
+          <!-- Layer: Store -->
+          <g>
+            <rect x="60" y="332" width="560" height="74" rx="12" fill="url(#band)" stroke="var(--border-glow)"/>
+            <text class="tm" x="76" y="354" font-size="11">PERSISTENCE — swarm-store (File / Mem)</text>
+            <rect x="76" y="362" width="86" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="86" y="382" font-size="11">events</text>
+            <rect x="172" y="362" width="96" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="182" y="382" font-size="11">sessions</text>
+            <rect x="278" y="362" width="70" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="288" y="382" font-size="11">jobs</text>
+            <rect x="358" y="362" width="106" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="368" y="382" font-size="11">telemetry</text>
+            <rect x="474" y="362" width="92" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="484" y="382" font-size="11">ledgers</text>
+          </g>
+
+          <!-- Layer: Foundation -->
+          <g>
+            <rect x="60" y="436" width="560" height="74" rx="12" fill="url(#band)" stroke="rgba(0,206,201,0.3)"/>
+            <text class="tm" x="76" y="458" font-size="11">FOUNDATION — serde-only, wire-stable</text>
+            <rect x="76" y="466" width="258" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="crate" x="92" y="487" font-size="13">swarm-contracts</text>
+            <text class="tm" x="200" y="487" font-size="10">ids · events · jobs · telemetry</text>
+            <rect x="346" y="466" width="258" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="crate" x="362" y="487" font-size="13">swarm-core</text>
+            <text class="tm" x="446" y="487" font-size="10">repo traits · pure derivers</text>
+          </g>
+
+          <!-- downward dependency arrows along left gutter -->
+          <g stroke="rgba(40,184,135,0.55)" stroke-width="2" fill="none">
+            <line x1="50" y1="94" x2="50" y2="122" marker-end="url(#arr)"/>
+            <line x1="50" y1="198" x2="50" y2="226" marker-end="url(#arr)"/>
+            <line x1="50" y1="302" x2="50" y2="330" marker-end="url(#arr)"/>
+            <line x1="50" y1="406" x2="50" y2="434" marker-end="url(#arr)"/>
+          </g>
+          <text class="tm" x="20" y="300" font-size="10" transform="rotate(-90 20 300)">depends on ▼</text>
+
+          <!-- side column: native harness + registrar -->
+          <g>
+            <rect x="668" y="124" width="252" height="178" rx="12" fill="rgba(130,90,200,0.06)" stroke="rgba(255,255,255,0.10)"/>
+            <text class="tm" x="684" y="146" font-size="11">NATIVE HARNESS — swarm-manager</text>
+            <rect x="684" y="156" width="100" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="694" y="175" font-size="11">providers</text>
+            <rect x="794" y="156" width="110" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="804" y="175" font-size="11">agent loop</text>
+            <rect x="684" y="194" width="100" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="694" y="213" font-size="11">tools</text>
+            <rect x="794" y="194" width="110" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="804" y="213" font-size="11">vault · keys</text>
+            <rect x="684" y="232" width="100" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="694" y="251" font-size="11">presets</text>
+            <rect x="794" y="232" width="110" height="30" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="t" x="804" y="251" font-size="11">skills</text>
+            <text class="tm" x="684" y="285" font-size="10">driven by swarm-exec's NativeBackend</text>
+          </g>
+          <!-- arrow exec -> manager -->
+          <g stroke="rgba(130,150,180,0.5)" stroke-width="2" fill="none" stroke-dasharray="4 3">
+            <line x1="620" y1="161" x2="666" y2="161" marker-end="url(#arr)"/>
+          </g>
+
+          <g>
+            <rect x="668" y="332" width="252" height="74" rx="12" fill="rgba(130,90,200,0.06)" stroke="rgba(255,255,255,0.10)"/>
+            <text class="tm" x="684" y="354" font-size="11">OPTIONAL</text>
+            <rect x="684" y="362" width="220" height="32" rx="7" fill="rgba(15,24,22,0.9)" stroke="rgba(255,255,255,0.12)"/>
+            <text class="crate" x="700" y="383" font-size="13">swarm-registrar</text>
+            <text class="tm" x="690" y="400" font-size="10"></text>
+          </g>
+
+          <!-- planned overlay -->
+          <g>
+            <rect x="60" y="540" width="860" height="60" rx="12" fill="none" stroke="rgba(230,200,80,0.4)" stroke-dasharray="6 4"/>
+            <text class="tm" x="76" y="562" font-size="11" fill="var(--yellow)">PLANNED (additive, see plan) — determinism + amplification, mostly free functions on existing seams</text>
+            <text class="t" x="76" y="585" font-size="11.5">CacheRepo · canonicalizer · seeds  ·  WorkerOutput channel  ·  judge() / best-of-N · verify-retry  ·  IterateBlock (converge fix)</text>
+          </g>
+        </svg>
+        <div class="legend">
+          <span><span class="sw" style="background:rgba(40,184,135,0.4);border:1px solid var(--border-glow)"></span> engine layers (DAG)</span>
+          <span><span class="sw" style="background:rgba(130,90,200,0.3);border:1px solid rgba(255,255,255,0.2)"></span> native harness / optional</span>
+          <span><span class="sw" style="background:transparent;border:1px dashed rgba(230,200,80,0.6)"></span> planned, additive</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- FIGURE 2: runtime flow -->
+    <section>
+      <div class="sec-head">
+        <div class="kicker">Dynamics</div>
+        <h2>Runtime data flow — a <code>fanout</code> run</h2>
+        <p>How one request becomes one answer. The dashed nodes are where the planned deterministic-collapse blocks attach without disturbing the flow.</p>
+      </div>
+      <div class="figure">
+        <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="fanout runtime flow">
+          <defs>
+            <marker id="arr2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L6,3 L0,6 Z" fill="rgba(0,206,201,0.75)"/>
+            </marker>
+          </defs>
+          <!-- nodes -->
+          <g>
+            <rect x="20" y="150" width="120" height="56" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(0,206,201,0.4)"/>
+            <text class="tb" x="80" y="174" font-size="13" text-anchor="middle">CLI / MCP</text>
+            <text class="tm" x="80" y="192" font-size="10" text-anchor="middle">verb + prompt</text>
+          </g>
+          <g>
+            <rect x="180" y="150" width="130" height="56" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(0,206,201,0.4)"/>
+            <text class="tb" x="245" y="174" font-size="13" text-anchor="middle">Routing</text>
+            <text class="tm" x="245" y="192" font-size="10" text-anchor="middle">chain + fallback</text>
+          </g>
+          <!-- workers fanout -->
+          <g>
+            <rect x="350" y="40" width="150" height="46" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(40,184,135,0.45)"/>
+            <text class="t" x="425" y="62" font-size="12" text-anchor="middle">worker: architecture</text>
+            <text class="tm" x="425" y="78" font-size="9.5" text-anchor="middle">backend (cli/http/native)</text>
+            <rect x="350" y="155" width="150" height="46" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(40,184,135,0.45)"/>
+            <text class="t" x="425" y="177" font-size="12" text-anchor="middle">worker: implementation</text>
+            <text class="tm" x="425" y="193" font-size="9.5" text-anchor="middle">retry-once → fallback</text>
+            <rect x="350" y="270" width="150" height="46" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(40,184,135,0.45)"/>
+            <text class="t" x="425" y="292" font-size="12" text-anchor="middle">worker: review</text>
+            <text class="tm" x="425" y="308" font-size="9.5" text-anchor="middle">ordered spawn/join</text>
+          </g>
+          <!-- evidence gate (planned collapse) -->
+          <g>
+            <rect x="540" y="150" width="140" height="56" rx="10" fill="none" stroke="rgba(230,200,80,0.55)" stroke-dasharray="5 3"/>
+            <text class="tb" x="610" y="172" font-size="12.5" text-anchor="middle" fill="var(--yellow)">judge()</text>
+            <text class="tm" x="610" y="190" font-size="9.5" text-anchor="middle">gate-filter + best-of-N</text>
+          </g>
+          <!-- manager synthesis -->
+          <g>
+            <rect x="710" y="150" width="130" height="56" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(0,206,201,0.4)"/>
+            <text class="tb" x="775" y="174" font-size="13" text-anchor="middle">Manager</text>
+            <text class="tm" x="775" y="192" font-size="10" text-anchor="middle">synthesis</text>
+          </g>
+          <!-- store -->
+          <g>
+            <rect x="860" y="150" width="84" height="56" rx="10" fill="rgba(15,24,22,0.95)" stroke="rgba(0,206,201,0.4)"/>
+            <text class="tb" x="902" y="172" font-size="12" text-anchor="middle">Store</text>
+            <text class="tm" x="902" y="190" font-size="9" text-anchor="middle">events</text>
+          </g>
+
+          <!-- edges -->
+          <g stroke="rgba(0,206,201,0.7)" stroke-width="2" fill="none">
+            <line x1="140" y1="178" x2="178" y2="178" marker-end="url(#arr2)"/>
+            <!-- routing to workers -->
+            <path d="M310 172 C 330 100, 335 70, 348 63" marker-end="url(#arr2)"/>
+            <line x1="310" y1="178" x2="348" y2="178" marker-end="url(#arr2)"/>
+            <path d="M310 184 C 330 260, 335 290, 348 293" marker-end="url(#arr2)"/>
+            <!-- workers to judge -->
+            <path d="M500 63 C 520 110, 525 140, 538 168" marker-end="url(#arr2)"/>
+            <line x1="500" y1="178" x2="538" y2="178" marker-end="url(#arr2)"/>
+            <path d="M500 293 C 520 250, 525 215, 538 188" marker-end="url(#arr2)"/>
+            <!-- judge to manager to store -->
+            <line x1="680" y1="178" x2="708" y2="178" marker-end="url(#arr2)"/>
+            <line x1="840" y1="178" x2="858" y2="178" marker-end="url(#arr2)"/>
+          </g>
+          <!-- cache annotation -->
+          <text class="tm" x="425" y="338" font-size="10" text-anchor="middle" fill="var(--yellow)">▲ planned: CacheRepo wraps every backend dispatch (content-addressed, zero-token replay)</text>
+        </svg>
+        <p class="note">Today the worker→manager hand-off is concatenated prose and the evidence gate only annotates. The planned <code>WorkerOutput</code> channel makes it typed, and <code>judge()</code> turns the gate into a real selector — the seam where cheap-model amplification (best-of-N, verify-retry) plugs in.</p>
+      </div>
+    </section>
+
+    <footer>
+      Companion to <a href="reports/03-rundown.html">the rundown</a>, <a href="reports/01-current-state.md">current state</a>, and <a href="reports/02-orchestration-plan.md">the plan</a>. Generated 2026-06-16.
+    </footer>
+  </div>
+</body>
+</html>

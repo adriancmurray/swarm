@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="swarm — Deterministic Intelligence Orchestration: a succinct rundown of the plan to make cheap models dramatically smarter by working together, on a strong block-composable foundation.">
+  <title>swarm — Deterministic Orchestration · Rundown</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-dark: hsl(165, 24%, 7%);
+      --bg-darker: hsl(160, 22%, 4%);
+      --bg-card: rgba(15, 24, 22, 0.7);
+      --bg-card-hover: rgba(22, 38, 34, 0.85);
+      --border-glow: rgba(40, 184, 135, 0.24);
+      --border-muted: rgba(255, 255, 255, 0.07);
+      --border-light: rgba(255, 255, 255, 0.15);
+      --accent-green: oklch(0.76 0.18 145);
+      --accent-cyan: oklch(0.75 0.18 190);
+      --accent-yellow: oklch(0.82 0.16 85);
+      --accent-red: oklch(0.65 0.2 25);
+      --gradient-purple: linear-gradient(135deg, oklch(0.74 0.16 150), oklch(0.58 0.14 185));
+      --gradient-text: linear-gradient(90deg, oklch(0.75 0.18 190) 0%, oklch(0.82 0.16 85) 100%);
+      --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-display: 'Outfit', var(--font-sans);
+      --font-mono: 'JetBrains Mono', monospace;
+      --text-muted: #a5b1c2;
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px;
+      --transition-fast: 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+      --transition-normal: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+      --shadow-glow-purple: 0 0 30px rgba(40, 184, 135, 0.18);
+    }
+    @supports (linear-gradient(in oklab, white, black)) {
+      :root { --gradient-text: linear-gradient(90deg in oklab, oklch(0.75 0.18 190) 0%, oklch(0.82 0.16 85) 100%); }
+    }
+
+    html { scroll-behavior: smooth; background-color: var(--bg-darker); color: #f5f6fa; font-family: var(--font-sans); line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; scroll-padding-top: 90px; }
+    body { position: relative; background: radial-gradient(circle at 50% 0%, var(--bg-dark) 0%, var(--bg-darker) 100%); }
+    a { color: inherit; text-decoration: none; transition: color var(--transition-fast); }
+    h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+    p { color: var(--text-muted); }
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg-darker); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 5px; border: 2px solid var(--bg-darker); }
+
+    .container { width: 100%; max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+    .gradient-text { background: var(--gradient-text); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .mono { font-family: var(--font-mono); }
+
+    /* Nav */
+    .navbar { position: fixed; top: 0; left: 0; width: 100%; height: 72px; z-index: 1000; border-bottom: 1px solid var(--border-muted); backdrop-filter: blur(16px) saturate(180%); background-color: rgba(8, 10, 9, 0.7); }
+    .navbar-container { max-width: 1140px; height: 100%; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+    .logo { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 800; font-size: 1.3rem; letter-spacing: -0.03em; }
+    .logo-svg { color: oklch(0.78 0.15 150); transition: transform 0.4s; }
+    .logo:hover .logo-svg { transform: rotate(30deg) scale(1.05); }
+    .logo-text { background: linear-gradient(90deg, #fff 0%, rgba(255,255,255,0.7) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .nav-links { display: flex; align-items: center; gap: 28px; }
+    .nav-link { font-size: 0.9rem; font-weight: 500; color: var(--text-muted); }
+    .nav-link:hover { color: #fff; }
+    .nav-tag { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent-green); border: 1px solid var(--border-glow); border-radius: 999px; padding: 4px 10px; background: rgba(40,184,135,0.08); }
+
+    /* Hero */
+    .hero { position: relative; padding: 150px 0 80px; overflow: hidden; }
+    .hero-glow { position: absolute; top: -25%; left: 50%; transform: translateX(-50%); width: 80%; height: 560px; background: radial-gradient(circle, rgba(40,184,135,0.18) 0%, rgba(0,206,201,0.05) 50%, transparent 100%); filter: blur(80px); pointer-events: none; z-index: 0; }
+    .hero-inner { position: relative; z-index: 1; max-width: 880px; }
+    .pill-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 9999px; font-weight: 500; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; background: rgba(40,184,135,0.12); border: 1px solid rgba(40,184,135,0.24); color: oklch(0.78 0.15 150); margin-bottom: 24px; }
+    .hero h1 { font-size: clamp(2.4rem, 5.5vw, 4rem); line-height: 1.05; margin-bottom: 22px; }
+    .hero-sub { font-size: 1.2rem; color: #b2bec3; max-width: 720px; margin-bottom: 36px; }
+    .verdict-card { display: flex; gap: 20px; align-items: flex-start; background: radial-gradient(circle at 0% 0%, rgba(40,184,135,0.12) 0%, transparent 55%), var(--bg-card); border: 1px solid var(--border-glow); border-radius: var(--radius-lg); padding: 28px 32px; box-shadow: var(--shadow-lg), var(--shadow-glow-purple); backdrop-filter: blur(10px); }
+    .verdict-stamp { flex-shrink: 0; font-family: var(--font-display); font-weight: 800; font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bg-darker); background: var(--gradient-purple); padding: 8px 16px; border-radius: 999px; margin-top: 3px; }
+    .verdict-body { font-size: 1.12rem; color: #e7ecea; line-height: 1.5; }
+    .verdict-body strong { color: #fff; }
+    .verdict-foot { margin-top: 14px; font-size: 0.85rem; color: var(--text-muted); font-family: var(--font-mono); }
+    .verdict-foot b { color: var(--accent-cyan); font-weight: 600; }
+
+    /* Sections */
+    section { padding: 64px 0; position: relative; }
+    .section-head { max-width: 720px; margin-bottom: 40px; }
+    .kicker { font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-green); margin-bottom: 12px; }
+    .section-head h2 { font-size: clamp(1.8rem, 3vw, 2.5rem); margin-bottom: 12px; background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.72) 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .section-head p { font-size: 1.05rem; }
+    .divider { border: none; border-top: 1px solid var(--border-muted); }
+
+    /* TLDR */
+    .tldr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .tldr-item { display: flex; gap: 16px; align-items: flex-start; background: var(--bg-card); border: 1px solid var(--border-muted); border-radius: var(--radius-md); padding: 22px 24px; transition: all var(--transition-normal); backdrop-filter: blur(8px); }
+    .tldr-item:hover { border-color: var(--border-glow); background: var(--bg-card-hover); transform: translateY(-3px); }
+    .tldr-num { flex-shrink: 0; font-family: var(--font-display); font-weight: 800; font-size: 1.1rem; color: oklch(0.78 0.15 150); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(40,184,135,0.08); border: 1px solid var(--border-glow); }
+    .tldr-item p { color: #d6ddda; font-size: 0.96rem; line-height: 1.5; }
+
+    /* Current vs Target */
+    .cmp-grid { display: grid; gap: 18px; }
+    .cmp-row { display: grid; grid-template-columns: 180px 1fr 44px 1fr; gap: 18px; align-items: stretch; background: rgba(0,0,0,0.18); border: 1px solid var(--border-muted); border-radius: var(--radius-md); padding: 20px 24px; }
+    .cmp-dim { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: #fff; display: flex; align-items: center; }
+    .cmp-cell { padding: 14px 16px; border-radius: var(--radius-sm); font-size: 0.92rem; line-height: 1.45; }
+    .cmp-now { background: rgba(255,107,107,0.06); border: 1px solid rgba(255,107,107,0.15); color: #e9c9c9; }
+    .cmp-target { background: rgba(40,184,135,0.07); border: 1px solid rgba(40,184,135,0.2); color: #cfe9df; }
+    .cmp-label { display: block; font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; opacity: 0.7; }
+    .cmp-arrow { display: flex; align-items: center; justify-content: center; color: var(--accent-green); font-size: 1.4rem; }
+
+    /* Pillars */
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+    .pillar { background: var(--bg-card); border: 1px solid var(--border-muted); border-radius: var(--radius-lg); padding: 28px; position: relative; overflow: hidden; transition: all var(--transition-normal); backdrop-filter: blur(8px); }
+    .pillar::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; background: var(--gradient-purple); opacity: 0; transition: opacity var(--transition-normal); }
+    .pillar:hover { transform: translateY(-4px); border-color: var(--border-glow); background: var(--bg-card-hover); box-shadow: var(--shadow-md); }
+    .pillar:hover::before { opacity: 1; }
+    .pillar h3 { font-size: 1.12rem; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+    .pillar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 10px rgba(40,184,135,0.5); flex-shrink: 0; }
+    .pillar p { font-size: 0.93rem; line-height: 1.55; }
+    .pillar code, .blk code, .amp code, .metric code { font-family: var(--font-mono); font-size: 0.82em; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; color: var(--accent-cyan); }
+
+    /* Blocks */
+    .blk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+    .blk { background: var(--bg-card); border: 1px solid var(--border-muted); border-radius: var(--radius-lg); padding: 26px; transition: all var(--transition-normal); backdrop-filter: blur(8px); }
+    .blk:hover { transform: translateY(-4px); border-color: var(--border-glow); background: var(--bg-card-hover); box-shadow: var(--shadow-md); }
+    .blk.keystone { border-color: var(--border-glow); background: radial-gradient(circle at 100% 0%, rgba(40,184,135,0.12) 0%, transparent 55%), var(--bg-card); }
+    .blk-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .blk-name { font-family: var(--font-mono); font-size: 1.02rem; font-weight: 600; color: #fff; }
+    .tier { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+    .tier-1 { background: rgba(40,184,135,0.12); border: 1px solid var(--border-glow); color: oklch(0.8 0.15 150); }
+    .tier-2 { background: rgba(130,150,180,0.1); border: 1px solid var(--border-muted); color: var(--text-muted); }
+    .keystone-tag { background: var(--gradient-purple); color: var(--bg-darker); border: none; font-weight: 700; }
+    .blk-contract { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent-cyan); background: rgba(0,0,0,0.25); border: 1px solid var(--border-muted); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px; overflow-x: auto; white-space: nowrap; }
+    .blk p { font-size: 0.9rem; line-height: 1.5; }
+
+    /* Amplification */
+    .amp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+    .amp { display: flex; flex-direction: column; gap: 12px; background: var(--bg-card); border: 1px solid var(--border-muted); border-radius: var(--radius-lg); padding: 26px; transition: all var(--transition-normal); backdrop-filter: blur(8px); }
+    .amp:hover { transform: translateY(-4px); border-color: var(--border-glow); background: var(--bg-card-hover); box-shadow: var(--shadow-md); }
+    .amp-icon { width: 42px; height: 42px; border-radius: var(--radius-sm); background: rgba(40,184,135,0.1); border: 1px solid rgba(40,184,135,0.2); display: flex; align-items: center; justify-content: center; color: oklch(0.8 0.15 150); }
+    .amp h3 { font-size: 1.08rem; color: #fff; }
+    .amp p { font-size: 0.92rem; line-height: 1.55; }
+
+    /* Roadmap timeline */
+    .timeline { position: relative; margin-left: 8px; padding-left: 36px; border-left: 2px solid var(--border-muted); }
+    .phase { position: relative; padding: 0 0 28px 8px; }
+    .phase:last-child { padding-bottom: 0; }
+    .phase::before { content: ''; position: absolute; left: -45px; top: 4px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-darker); border: 2px solid var(--accent-green); box-shadow: 0 0 12px rgba(40,184,135,0.4); }
+    .phase.conditional::before { border-color: var(--accent-yellow); box-shadow: 0 0 12px rgba(230,200,80,0.35); background: var(--bg-darker); }
+    .phase-title { font-family: var(--font-display); font-weight: 700; font-size: 1.12rem; color: #fff; margin-bottom: 6px; }
+    .phase-title .tag { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent-yellow); border: 1px solid rgba(230,200,80,0.3); border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: middle; }
+    .phase p { font-size: 0.93rem; line-height: 1.5; }
+
+    /* Metrics */
+    .metrics-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+    .metric { display: flex; gap: 14px; align-items: flex-start; background: rgba(0,0,0,0.18); border: 1px solid var(--border-muted); border-radius: var(--radius-md); padding: 18px 20px; transition: border-color var(--transition-fast); }
+    .metric:hover { border-color: var(--border-glow); }
+    .metric .check { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: rgba(40,184,135,0.12); border: 1px solid var(--border-glow); display: flex; align-items: center; justify-content: center; color: var(--accent-green); margin-top: 2px; }
+    .metric p { font-size: 0.9rem; line-height: 1.45; color: #d6ddda; }
+
+    /* Footer / CTA */
+    .cta { padding: 56px 0 40px; }
+    .cta-card { background: radial-gradient(circle at 100% 100%, rgba(40,184,135,0.14) 0%, transparent 60%), var(--bg-card); border: 1px solid var(--border-muted); border-radius: var(--radius-xl); padding: 48px 40px; text-align: center; box-shadow: var(--shadow-lg), var(--shadow-glow-purple); }
+    .cta-card h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); color: #fff; margin-bottom: 12px; }
+    .cta-card p { max-width: 560px; margin: 0 auto 28px; }
+    .doc-links { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .doc-link { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.92rem; padding: 13px 24px; border-radius: var(--radius-md); border: 1px solid var(--border-light); background: rgba(255,255,255,0.05); transition: all var(--transition-normal); }
+    .doc-link:hover { transform: translateY(-2px); border-color: #fff; background: rgba(255,255,255,0.1); }
+    .doc-link.primary { background: var(--gradient-purple); border: 1px solid rgba(255,255,255,0.15); color: #fff; box-shadow: 0 4px 15px rgba(40,184,135,0.32); }
+    footer { border-top: 1px solid var(--border-muted); padding: 36px 0 56px; text-align: center; }
+    footer p { font-size: 0.82rem; color: var(--text-muted); line-height: 1.7; }
+
+    @media (max-width: 768px) {
+      .nav-links { gap: 16px; }
+      .nav-links .nav-link { display: none; }
+      .verdict-card { flex-direction: column; gap: 14px; }
+      .cmp-row { grid-template-columns: 1fr; gap: 10px; }
+      .cmp-arrow { transform: rotate(90deg); }
+      section { padding: 48px 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="navbar">
+    <div class="navbar-container">
+      <a href="#top" class="logo">
+        <svg class="logo-svg" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="5" r="2.5" fill="currentColor"></circle>
+          <circle cx="5" cy="15" r="2.5" fill="currentColor"></circle>
+          <circle cx="19" cy="15" r="2.5" fill="currentColor"></circle>
+          <path d="M12 7.5L5.8 13.5M12 7.5L18.2 13.5M6.8 15.5H17.2M12 7.5V15" stroke-dasharray="2 2"></path>
+          <circle cx="12" cy="15" r="1.5" fill="currentColor"></circle>
+        </svg>
+        <span class="logo-text">swarm</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#pillars" class="nav-link">Determinism</a>
+        <a href="#blocks" class="nav-link">Blocks</a>
+        <a href="#amplify" class="nav-link">Amplify</a>
+        <a href="#roadmap" class="nav-link">Roadmap</a>
+        <span class="nav-tag">RUNDOWN</span>
+      </nav>
+    </div>
+  </header>
+
+  <!-- HERO + VERDICT -->
+  <section class="hero" id="top">
+    <div class="hero-glow"></div>
+    <div class="container hero-inner">
+      <div class="pill-badge">● Executive Rundown · 2026-06-16</div>
+      <h1>Make cheap models <span class="gradient-text">dramatically smarter</span> — deterministically.</h1>
+      <p class="hero-sub">A succinct plan to turn <span class="mono">swarm</span> into a deterministic, block-composable intelligence-orchestration engine. The foundation is already lego-grade. The win is additive — not a rewrite.</p>
+
+      <div class="verdict-card">
+        <span class="verdict-stamp">Verdict · Evolve</span>
+        <div>
+          <p class="verdict-body"><strong>Evolve in place</strong> — ship the value (a typed worker channel + a content-addressed leaf cache) <em>before</em> any framework. Build the Block/Plan IR only if a second consumer ever earns it.</p>
+          <p class="verdict-foot">Judge panel: <b>evolve 41/50</b> · rewrite 39/50 · fork 37/50 — all three theses converged on the same two grafts. That agreement is the signal.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TL;DR -->
+  <section id="tldr">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">The five things to know</div>
+        <h2>TL;DR</h2>
+      </div>
+      <div class="tldr-grid">
+        <div class="tldr-item"><span class="tldr-num">1</span><p>The foundation (contracts / core / store + pure routing &amp; gate primitives) is <strong>lego-grade</strong> — extend it, never rewrite.</p></div>
+        <div class="tldr-item"><span class="tldr-num">2</span><p>Highest-leverage win is a typed <code>Vec&lt;WorkerOutput&gt;</code> channel replacing the worker→manager prose concat at <code>orchestration.rs:1817</code>.</p></div>
+        <div class="tldr-item"><span class="tldr-num">3</span><p>The <strong>content-addressed cache</strong>, not seeds, is the determinism spine — the default codex/claude agents are subprocesses with no seed.</p></div>
+        <div class="tldr-item"><span class="tldr-num">4</span><p>Goal #3 ships with <strong>zero framework</strong>: gate-as-filter + best-of-N + verify-retry are free functions, not a trait.</p></div>
+        <div class="tldr-item"><span class="tldr-num">5</span><p>Cut Quorum and Escalate (orphans); <strong>defer the Block/Plan/Scheduler IR</strong> until a real second DAG consumer demands it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CURRENT vs TARGET -->
+  <section id="state">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Where it is → where it goes</div>
+        <h2>Now vs. Target</h2>
+        <p>Three dimensions, judged against the three goals. Every "now" is grounded in the working tree.</p>
+      </div>
+      <div class="cmp-grid">
+        <div class="cmp-row">
+          <div class="cmp-dim">Determinism</div>
+          <div class="cmp-cell cmp-now"><span class="cmp-label">Today</span>Control flow is reproducible; leaf calls re-invoke the LLM every run — no cache.</div>
+          <div class="cmp-arrow">→</div>
+          <div class="cmp-cell cmp-target"><span class="cmp-label">Target</span>Zero-token cached replay + canonical run-hash; seeds for HTTP/native backends.</div>
+        </div>
+        <div class="cmp-row">
+          <div class="cmp-dim">Composability</div>
+          <div class="cmp-cell cmp-now"><span class="cmp-label">Today</span>Worker→manager data is concatenated prose; the verbs are three monoliths.</div>
+          <div class="cmp-arrow">→</div>
+          <div class="cmp-cell cmp-target"><span class="cmp-label">Target</span>Typed <code>WorkerOutput</code> channel; optional Block/Plan IR if a second consumer lands.</div>
+        </div>
+        <div class="cmp-row">
+          <div class="cmp-dim">Amplification</div>
+          <div class="cmp-cell cmp-now"><span class="cmp-label">Today</span>The gate is advisory; no best-of-N, no live verifier; converge never converges.</div>
+          <div class="cmp-arrow">→</div>
+          <div class="cmp-cell cmp-target"><span class="cmp-label">Target</span>Deterministic judge + best-of-N + verify-retry + Jaccard early-stop.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- DETERMINISM PILLARS -->
+  <section id="pillars">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Goal #1 — Reproducibility</div>
+        <h2>Determinism Pillars</h2>
+        <p>The control flow is already pure. These five mechanisms make a whole run reproducible despite stochastic leaves.</p>
+      </div>
+      <div class="grid-3">
+        <div class="pillar"><h3><span class="dot"></span>Content cache = the spine</h3><p>A <code>sha256(canonical request)</code> cache on <code>execute_with_fallback</code> is the only replay path for the default subprocess backends. Write only when <code>!timed_out &amp;&amp; !retryable &amp;&amp; exit==0</code>.</p></div>
+        <div class="pillar"><h3><span class="dot"></span>Seeds are a footnote</h3><p>Seed / temperature plumb only to HTTP &amp; native providers. The cli-subprocess and Anthropic-cloud paths stay stochastic and rely on the cache.</p></div>
+        <div class="pillar"><h3><span class="dot"></span>Collapse before the manager</h3><p>A pure <code>judge()</code> drops unverified workers and ranks survivors — turning <code>gate.verified</code> from a byte-cap signal into a real selector.</p></div>
+        <div class="pillar"><h3><span class="dot"></span>Canonical projection, not raw bytes</h3><p>Parity &amp; run-hash fold over a seq/ts/pid/heartbeat-stripped, role-sorted event projection — built in Phase 0, reusing the repo's own <code>strip_seq</code>.</p></div>
+        <div class="pillar"><h3><span class="dot"></span>Quantize the two comparators</h3><p>Both <code>partial_cmp</code>-on-score sites (<code>telemetry.rs:501</code> and <code>:537</code>) become total via i64 quantization + a stable index tiebreak.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- BLOCK TAXONOMY -->
+  <section id="blocks">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Goal #2 — Lego composability</div>
+        <h2>The Blocks</h2>
+        <p>Tier 1 ships first and stands alone — value types + free functions. Tier 2 is the framework, built only if a second DAG consumer appears.</p>
+      </div>
+      <div class="blk-grid">
+        <div class="blk keystone">
+          <div class="blk-top"><span class="blk-name">WorkerOutput</span><span class="tier keystone-tag">Keystone</span></div>
+          <div class="blk-contract">{ role, spec, outcome, gate }</div>
+          <p>Replaces the prose concat; stays in <code>swarm-exec</code>, not promoted to contracts in v1. Unblocks everything downstream.</p>
+        </div>
+        <div class="blk">
+          <div class="blk-top"><span class="blk-name">Verdict</span><span class="tier tier-1">Tier 1</span></div>
+          <div class="blk-contract">{ accepted, winner, missing, score: i64 }</div>
+          <p>Typed collapse result — a quantized integer score, never a raw f64.</p>
+        </div>
+        <div class="blk">
+          <div class="blk-top"><span class="blk-name">judge()</span><span class="tier tier-1">Tier 1 · free fn</span></div>
+          <div class="blk-contract">&amp;[WorkerOutput] → Verdict</div>
+          <p>Pure best-of-N selector. A stateless reducer needs no trait.</p>
+        </div>
+        <div class="blk">
+          <div class="blk-top"><span class="blk-name">verify_retry</span><span class="tier tier-1">Tier 1 · free fn</span></div>
+          <div class="blk-contract">&amp;str → Result&lt;(), Vec&lt;String&gt;&gt;</div>
+          <p>Wires the dead <code>verify_metadirector_contract</code> as a retry-once predicate.</p>
+        </div>
+        <div class="blk">
+          <div class="blk-top"><span class="blk-name">LeafBlock</span><span class="tier tier-2">Tier 2</span></div>
+          <div class="blk-contract">BlockInput → [WorkerOutput]</div>
+          <p>The only impure block; consults the cache. Built only if the IR is greenlit.</p>
+        </div>
+        <div class="blk">
+          <div class="blk-top"><span class="blk-name">IterateBlock</span><span class="tier tier-2">Tier 2</span></div>
+          <div class="blk-contract">BlockInput → BlockOutput</div>
+          <p>converge done right — a Jaccard early-stop replacing the fixed loop.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- AMPLIFICATION -->
+  <section id="amplify">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Goal #3 — Cheap models, working together</div>
+        <h2>Amplification Blocks</h2>
+        <p>How weak models compound into strong answers — every one of these is a free function, shippable with no framework.</p>
+      </div>
+      <div class="amp-grid">
+        <div class="amp">
+          <div class="amp-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M7 12h10M11 18h2"/></svg></div>
+          <h3>Gate-as-filter</h3>
+          <p>The manager spends its limited budget only on cited, non-blocked evidence — a weak manager, far better synthesis.</p>
+        </div>
+        <div class="amp">
+          <div class="amp-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.2 7.2 15.6 11M8.2 16.8 15.6 13"/></svg></div>
+          <h3>Best-of-N</h3>
+          <p>N cheap samples + a deterministic judge beat one expensive call; the cache dedupes identical sub-prompts.</p>
+        </div>
+        <div class="amp">
+          <div class="amp-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <h3>Verification chain</h3>
+          <p>A cheap generator + a pure structural verifier catches missing-section / uncited output and retries once.</p>
+        </div>
+        <div class="amp">
+          <div class="amp-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></div>
+          <h3>Iterative refinement</h3>
+          <p>Models refine until output stabilizes (Jaccard) instead of burning a fixed iteration budget.</p>
+        </div>
+        <div class="amp">
+          <div class="amp-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V7z"/></svg></div>
+          <h3>De-game the gate</h3>
+          <p>Citations checked against the real index — not the literal <code>/Users/</code> — so best-of-N stops amplifying gaming.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ROADMAP -->
+  <section id="roadmap">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Each phase ships on its own</div>
+        <h2>The Roadmap</h2>
+        <p>Value lands in Phases 0–3 with free functions and a cache wrapper. The framework (P4) is conditional; if no second consumer appears, it is correctly never built.</p>
+      </div>
+      <div class="timeline">
+        <div class="phase"><div class="phase-title">P0 · Foundation + parity harness</div><p>Canonicalizer + a <code>MemCacheRepo</code> test path, an injected <code>Clock</code>, two total comparators — zero behavior change.</p></div>
+        <div class="phase"><div class="phase-title">P1 · Typed worker channel</div><p><code>WorkerOutput</code> replaces the concat; the manager prompt is pinned byte-identical by a snapshot test.</p></div>
+        <div class="phase"><div class="phase-title">P1.5 · Amplification (no framework)</div><p>Gate-filter + best-of-N + verify-retry as free functions — goal #3 met with no new crates.</p></div>
+        <div class="phase"><div class="phase-title">P2 · Content cache + seeds</div><p>Zero-token replay on subprocess agents; reproducible HTTP/native. Default-off behind <code>--cache</code>.</p></div>
+        <div class="phase"><div class="phase-title">P3 · converge fix + observability</div><p>Jaccard early-stop plus the missing <code>JobRecord</code> / event / summary plumbing converge lacks today.</p></div>
+        <div class="phase conditional"><div class="phase-title">P4 · Block IR <span class="tag">Conditional</span></div><p>DAG-as-data + collapse ~150 lines of manager dispatch — only if a real second consumer appears.</p></div>
+        <div class="phase"><div class="phase-title">P5 · Replay surface + symmetry</div><p><code>swarm replay</code> (zero LLM calls), <code>--json</code> result envelopes for all verbs, converge + ledger over MCP.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- METRICS -->
+  <section id="metrics">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">How we know it worked</div>
+        <h2>Success Metrics</h2>
+      </div>
+      <div class="metrics-list">
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p>Best-of-N beats a single cheap sample on the gate score — with no trait, no cache, no seeds in the build path.</p></div>
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p><code>gate.verified</code> is read as a selector in <code>judge()</code> / orchestration (today only as a byte-cap at <code>synthesis.rs:324</code>).</p></div>
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p><code>swarm replay</code> against a warm cache makes zero LLM calls and reproduces the same Verdict / winner.</p></div>
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p><code>verify_metadirector_contract</code> gains a production caller (today every caller is test-only).</p></div>
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p>converge halts at iteration 2 on a converging task and emits <code>Worker*</code>/<code>Manager*</code> events + a <code>JobRecord</code> per iteration.</p></div>
+        <div class="metric"><span class="check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><p>A timed-out or nonzero-exit outcome is never served as a cache hit (unit-tested).</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA / full reports -->
+  <section class="cta">
+    <div class="container">
+      <div class="cta-card">
+        <h2>Read the full picture</h2>
+        <p>This rundown is the summary. The two companion reports carry every claim, grounded at <span class="mono">file:line</span>.</p>
+        <div class="doc-links">
+          <a class="doc-link primary" href="01-current-state.md">📋 Report 1 — Current State</a>
+          <a class="doc-link" href="02-orchestration-plan.md">🗺️ Report 2 — The Plan</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        <strong style="color:#fff;">swarm</strong> — deterministic intelligence orchestration · rundown generated 2026-06-16<br>
+        Synthesized by a 22-agent analysis workflow: 9 grounded subsystem readers + determinism &amp; amplification audits → 3 architects (evolve / fork / rewrite) → judge panel → adversarial critique → revision.
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // Subtle scroll-reveal — progressive enhancement only; page is fully readable without JS.
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) { e.target.style.opacity = '1'; e.target.style.transform = 'none'; io.unobserve(e.target); } });
+    }, { threshold: 0.08 });
+    document.querySelectorAll('.tldr-item, .pillar, .blk, .amp, .phase, .metric, .cmp-row').forEach((el) => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(14px)';
+      el.style.transition = 'opacity 0.5s cubic-bezier(0.16,1,0.3,1), transform 0.5s cubic-bezier(0.16,1,0.3,1)';
+      io.observe(el);
+    });
+  </script>
+</body>
+</html>
