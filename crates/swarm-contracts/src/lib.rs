@@ -8,11 +8,13 @@
 //!
 //! - [`ids`] — `SessionId`, `JobId`, `ProposalId`, `PresetId` newtypes
 //! - [`events`] — `EventKind` (31 variants + bare-string wire), `SessionEventV2` envelope
+//! - [`canonical`] — `canonicalize` / `canonical_run_hash`: deterministic functional projection of an event stream
 //! - [`jobs`] — `JobStatus`, `JobAgent`, `JobMode` enums + `JobRecord` struct
 //! - [`mcp`] — `McpToolDescriptor` shared MCP tool-descriptor type
 //! - [`telemetry`] — `AgentObservation`, `AgentFeedback`, `AgentProposal`, `AgentProposalVote`
 //! - [`package`] — `LayerReport` envelope
 
+pub mod canonical;
 pub mod events;
 pub mod ids;
 pub mod jobs;
