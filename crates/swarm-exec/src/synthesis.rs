@@ -278,6 +278,20 @@ fn worker_score(gate: &WorkerEvidenceGate) -> i64 {
     (gate.citation_count as i64) * 1000 - (gate.evidence_gap_count as i64)
 }
 
+/// Gate-as-filter: the verified subset of `workers` for manager synthesis, so a
+/// weak manager spends its budget only on cited, non-blocked evidence. Falls back
+/// to the full set when none passed the gate — a manager with nothing to
+/// synthesize is worse than one given unverified material. Order-preserving; the
+/// full set is still recorded in the result artifact, so nothing is hidden.
+pub fn verified_for_manager(workers: &[WorkerOutput]) -> Vec<WorkerOutput> {
+    let verified: Vec<WorkerOutput> = workers.iter().filter(|w| w.gate.verified).cloned().collect();
+    if verified.is_empty() {
+        workers.to_vec()
+    } else {
+        verified
+    }
+}
+
 pub fn build_worker_prompt(task: &str, role: &str, context: Option<&str>) -> String {
     let mut prompt = format!(
         "You are the `{role}` worker in a stacked agent swarm.\n\
@@ -911,6 +925,29 @@ mod tests {
             "equal scores must resolve to the first-seen worker"
         );
         assert!(v.rejected.is_empty());
+    }
+
+    #[test]
+    fn verified_for_manager_keeps_verified_or_falls_back_to_all() {
+        // Mixed: only the gate-passing worker reaches the manager.
+        let mixed = vec![
+            wo("a", 0, output("uncited junk", "", false)),
+            wo("b", 0, verified_packet()),
+        ];
+        let kept = verified_for_manager(&mixed);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].worker.role, "b");
+
+        // None verified: fall back to the full set so the manager has material.
+        let none = vec![
+            wo("a", 0, output("uncited", "", false)),
+            wo("b", 1, output("error", "", false)),
+        ];
+        assert_eq!(
+            verified_for_manager(&none).len(),
+            2,
+            "fall back to all when none verify"
+        );
     }
 
     #[test]

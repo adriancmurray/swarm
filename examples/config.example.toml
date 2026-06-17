@@ -107,3 +107,8 @@ fallback_chain   = ["claude:sonnet", "codex"]
 # replay from $SWARM_HOME/cache at zero token cost — the determinism/replay spine
 # for the default subprocess agents, which expose no sampling seed.
 cache            = false
+# Opt-in gate-as-filter for manager synthesis. Off by default. When true, fanout
+# drops workers that fail the evidence gate before synthesis (falling back to all
+# if none pass), so a weak manager reasons only over verified evidence. The full
+# worker set is still recorded in the result artifact.
+gate_filter      = false

@@ -49,7 +49,8 @@ use crate::synthesis::{
     build_discussion_digest, build_discussion_manager_prompt, build_discussion_turn_prompt,
     build_docs_prompt, build_manager_prompt, build_profile_helper_prompt,
     build_swarm_result_artifact, build_swarm_transcript, build_worker_prompt,
-    capped_manager_output, preview_for_event, render_context_block, WorkerOutput,
+    capped_manager_output, preview_for_event, render_context_block, verified_for_manager,
+    WorkerOutput,
 };
 
 /// Build the optional worker-dispatch cache from config. Returns `None` when
@@ -527,8 +528,15 @@ pub fn run_swarm(args: SwarmArgs) -> Result<i32, String> {
         }
     }
 
-    let synthesis_prompt =
-        build_manager_prompt(&args.prompt, &worker_results, context_ref.as_deref());
+    // Gate-as-filter (opt-in): give the manager only gate-passing workers so a
+    // weak synthesizer reasons over verified evidence. Falls back to all when
+    // none passed. The full set is still recorded in the result artifact below.
+    let synthesis_prompt = if config.reliability.gate_filter {
+        let filtered = verified_for_manager(&worker_results);
+        build_manager_prompt(&args.prompt, &filtered, context_ref.as_deref())
+    } else {
+        build_manager_prompt(&args.prompt, &worker_results, context_ref.as_deref())
+    };
     let manager_args = Args {
         prompt: synthesis_prompt.clone(),
         cwd: args.cwd,

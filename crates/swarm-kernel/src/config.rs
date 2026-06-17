@@ -159,6 +159,13 @@ pub struct ReliabilityConfig {
     /// backends. See `swarm-exec/src/cache.rs`.
     #[serde(default)]
     pub cache: bool,
+    /// Opt-in gate-as-filter for manager synthesis. Off by default; when true,
+    /// fanout drops workers that failed the evidence gate before manager
+    /// synthesis (falling back to all workers if none passed), so a weak manager
+    /// reasons only over verified evidence. The full worker set is still recorded
+    /// in the result artifact.
+    #[serde(default)]
+    pub gate_filter: bool,
 }
 
 impl Default for ReliabilityConfig {
@@ -170,6 +177,7 @@ impl Default for ReliabilityConfig {
             learned_routing: default_learned_routing(),
             learned_min_observations: default_learned_min_observations(),
             cache: false,
+            gate_filter: false,
         }
     }
 }
