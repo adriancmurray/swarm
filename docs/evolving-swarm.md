@@ -84,26 +84,30 @@ For any claimed bug/finding, spawn N independent skeptics prompted to *refute* i
 
 ---
 
-## The work queue (status as of 2026-06-16, end of session)
+## The work queue (status as of 2026-06-16)
 
-**DONE this session (committed on `evolve/p0-determinism-foundation`, pushed):**
-- ✅ Determinism ordering — score comparators (`telemetry.rs` `score_key`), `ToolRegistry` HashMap→BTreeMap, `read_dir` id-sorting + the `take(80)` artifact bug (store + mcp), Mem repos `list()` id-sorted.
-- ✅ **Canonicalizer (P0)** — pure event projection + `canonical_run_hash` in `swarm-contracts/canonical.rs`, from a data-driven spec ([docs/specs/canonicalizer-spec.md](specs/canonicalizer-spec.md), all 31 `EventKind` variants). 8 tests.
-- ✅ **`WorkerOutput` keystone (P1)** — the anonymous `(WorkerSpec, i32, RunOutcome)` tuple is now a named `WorkerOutput { worker, exit_code, outcome, gate }` carrying the gate computed once. Behavior-preserving + a keystone test.
-- ✅ **`judge()` selector (P1.5 core)** — `Verdict` + pure `judge(&[WorkerOutput]) -> Verdict` (drops `gate.verified == false`, ranks by quantized score, stable tie-break). Wired into the result artifact's "Deterministic Decision" section. `gate.verified` is now a real selector.
-- ✅ **Content cache (P2)** — `CacheRepo` + Mem/File + `cache_key`/`is_cacheable`/`with_cache` in `swarm-exec/cache.rs`, wired into worker dispatch behind default-off `[reliability].cache`. Collision-safe FNV-1a key; clean-success-only storage. 7 tests. (Lives in `swarm-exec`, not `swarm-core` — `RunOutcome` is kernel-level, above core.)
-- ✅ **converge early-stop (P3a)** — `jaccard_similarity` + `CONVERGE_STABILITY_THRESHOLD`; converge halts once the baseline stabilizes instead of burning a fixed budget. 3 tests.
+**DONE — `evolve/p0-determinism-foundation` (merged to `main`):**
+- ✅ Determinism ordering — comparators, `ToolRegistry`→`BTreeMap`, `read_dir` id-sorting + the `take(80)` artifact bug, Mem-repo `list()` parity.
+- ✅ **Canonicalizer (P0)** — pure event projection + `canonical_run_hash` (`swarm-contracts/canonical.rs`), data-driven spec ([spec](specs/canonicalizer-spec.md)). 8 tests.
+- ✅ **`WorkerOutput` keystone (P1)** — typed worker→manager channel carrying the gate computed once. Behavior-preserving.
+- ✅ **`judge()` (P1.5 core)** — pure decision-collapse; `gate.verified` is a real selector, surfaced in the result artifact.
+- ✅ **Content cache (P2)** — `CacheRepo` + Mem/File + `with_cache`, wired into worker dispatch behind default-off `[reliability].cache`. Collision-safe. 7 tests.
+- ✅ **converge early-stop (P3a)** — Jaccard baseline-stability halt. 3 tests.
 
-Workspace: **578 tests, 0 failures.**
+**DONE — `evolve/amplification` (open):**
+- ✅ **gate-as-filter (P1.5a)** — `verified_for_manager` + default-off `[reliability].gate_filter`; manager reasons over verified workers (falls back to all). 1 test.
+- ✅ **best-of-N (P1.5b)** — `swarm --best-of N`: sample the manager spec N×, `judge()`-select; **cache bypassed** for sample diversity. Parse + validation tests.
+- ✅ **converge observability (P3b)** — tracking JobRecord + Worker/Manager/Session events; warning-free.
+- ✅ **`run-hash` (P5 parity half)** — `swarm run-hash <session>` prints `canonical_run_hash`; the canonicalizer's first CLI consumer + the reproducibility check.
 
-**Next, in dependency order — with the gotchas found this session:**
-1. **best-of-N (P1.5b)** — the headline amplification: run one spec ×N, collapse with the now-ready `judge()`. **Design gotcha:** seedless subprocess agents (the default) get sample diversity only from stochasticity, so best-of-N must **bypass the content cache** for its samples (an identical prompt would cache-hit and return N copies of one draw). Cleanest shape: a new `best-of` verb (touches `args.rs` parser, `cli.rs` command table at :76 + help list at :155, the `service.rs`/`orchestration.rs:1430` dispatch, and the command-token stability test) OR a `--best-of N` flag on `swarm` that swaps the worker list for N copies of a sampling spec and selects via `judge()` instead of manager synthesis. Prefer the flag (lower surface).
-2. **verify-retry (P1.5c)** — wire the dead `verify_metadirector_contract`. **Gotcha:** it requires a "Source Map" section that `build_manager_prompt` (fanout) does NOT ask for — so it belongs in the **metadirector/direct-persona path** (`service.rs` → `run_dispatch`), not fanout, or it will spuriously retry every fanout run. Add a fail-closed `FALSIFIED:` parser for the discuss red-team while here.
-3. **gate-as-filter into the manager prompt (P1.5a)** — use `judge()` to drop/down-weight `gate.verified == false` workers before synthesis. Must fall back to all workers when none verify (else the manager gets nothing). Behavior change → config-gate it.
-4. **converge observability (P3b)** — converge emits no `JobRecord`/events and is invisible to monitor/sessions/MCP (verified). Add the spine; route its raw string concat (`orchestration.rs` ~1846) through `WorkerOutput`.
-5. **seeds (P2 tail)** — `seed`/`temperature` on `BackendRequest`, plumbed to HTTP/native only; fix the `temperature = 0.7` hardcode at `provider/mod.rs:192`. Subprocess agents can't use seeds (cache is their determinism).
-6. **Replay surface (P5)** — `swarm replay` (re-run argv against a warm cache, assert zero LLM calls + matching `canonical_run_hash` — both primitives now exist); `--json` result envelopes for all verbs.
-7. **Block/Plan/Scheduler IR (P4, CONDITIONAL)** — only if a real second DAG consumer appears. Otherwise skip.
+Workspace: **580 tests, 0 failures, 0 warnings.**
+
+**Remaining — with the gotchas found:**
+1. **verify-retry (P1.5c)** — wire the dead `verify_metadirector_contract`. **Two gotchas:** (a) it needs a "Source Map" section the fanout manager doesn't produce, so it belongs in the **metadirector/direct-persona path** (`service.rs` → `run_dispatch`), not fanout; (b) `run_partner_foreground` *consumes* the output (prints + saves) without returning it, so a clean retry-once needs that function refactored to return the `RunOutcome`. Not done to avoid destabilizing the shared `run` dispatch for modest value. Add a fail-closed `FALSIFIED:` parser for the discuss red-team while here.
+2. **full `swarm replay` (P5 tail)** — `run-hash` is the *verification* half (done). The *re-run* half needs argv/spec capture per session (today only the prompt is stored in the JobRecord) + a re-dispatch path that asserts zero LLM calls against a warm cache and a matching `canonical_run_hash`. Design the argv-capture first.
+3. **seeds (P2 tail, footnote)** — `seed`/`temperature` on `BackendRequest`, plumbed to HTTP/native providers only; fix the `temperature = 0.7` hardcode at `provider/mod.rs:192`. Low marginal value: the cache already gives the *default* subprocess agents reproducibility; seeds only help the HTTP/native minority.
+4. **`--json` result envelopes** for all verbs (versioned `agent-swarm/*-result/v1`), and expose `converge`/`ledger` over MCP.
+5. **Block/Plan/Scheduler IR (P4, CONDITIONAL)** — only if a real second DAG consumer appears. Otherwise skip.
 
 Pick the lowest-numbered unblocked item, run the loop, leave it green.
 
